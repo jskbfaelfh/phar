@@ -29,7 +29,7 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
 
   const port = process.env.PORT || 4000;
-  await app.listen(port);
-  logger.log(`🚀 Dawaee Backend API is running on: http://localhost:${port}/api`);
+  await app.listen(port, '0.0.0.0');
+  logger.log(`🚀 Dawaee Backend API is running on port ${port}`);
 }
 bootstrap();
