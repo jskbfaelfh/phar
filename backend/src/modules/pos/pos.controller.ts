@@ -1,0 +1,44 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { PosService } from './pos.service';
+import { CheckoutDto, CreateReturnDto } from './dto/create-sale.dto';
+import { SubscriptionGuard } from '../../common/guards/subscription.guard';
+
+@Controller('pos')
+@UseGuards(AuthGuard('jwt'), SubscriptionGuard)
+export class PosController {
+  constructor(private readonly posService: PosService) {}
+
+  @Post('checkout')
+  async checkout(@Body() dto: CheckoutDto) {
+    return this.posService.checkout(dto);
+  }
+
+  @Post('return')
+  async processReturn(@Body() dto: CreateReturnDto) {
+    return this.posService.processReturn(dto);
+  }
+
+  @Get('daily-summary')
+  async getDailySummary() {
+    return this.posService.getDailySummary();
+  }
+
+  @Get('sales')
+  async getSalesHistory(@Query() query: { limit?: number; search?: string }) {
+    return this.posService.getSalesHistory(query);
+  }
+
+  @Get('sales/:id')
+  async getSaleById(@Param('id') id: string) {
+    return this.posService.getSaleById(id);
+  }
+}

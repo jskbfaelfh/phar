@@ -1,0 +1,133 @@
+import {
+  Injectable,
+  UnauthorizedException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
+import * as bcrypt from 'bcrypt';
+import { PrismaService } from '../../database/prisma.service';
+import { LoginDto, AdminLoginDto } from './dto/login.dto';
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  async login(loginDto: LoginDto) {
+    const { pharmacySlug, username, password } = loginDto;
+
+    // 1. Check Tenant in Master DB
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { slug: pharmacySlug },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('الصيدلية غير مسجلة في النظام');
+    }
+
+    if (tenant.subscriptionStatus === 'SUSPENDED') {
+      throw new ForbiddenException('تم إيقاف حساب هذه الصيدلية مؤقتاً، يرجى مراجعة إدارة النظام');
+    }
+
+    // 2. Fetch User inside Tenant Schema
+    const users: any[] = await this.prisma.$queryRawUnsafe(
+      `SELECT id, name, username, password_hash, role, is_active FROM "${tenant.schemaName}".users WHERE username = $1 LIMIT 1`,
+      username,
+    );
+
+    const user = users[0];
+    if (!user) {
+      throw new UnauthorizedException('اسم المستخدم أو كلمة المرور غير صحيحة');
+    }
+
+    if (!user.is_active) {
+      throw new ForbiddenException('تم تعطيل حساب هذا المستخدم');
+    }
+
+    // 3. Verify Password
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('اسم المستخدم أو كلمة المرور غير صحيحة');
+    }
+
+    // Check if subscription has expired and update status if needed
+    const now = new Date();
+    let currentStatus = tenant.subscriptionStatus;
+    if (tenant.subscriptionEndsAt < now && tenant.subscriptionStatus === 'ACTIVE') {
+      currentStatus = 'EXPIRED';
+      await this.prisma.tenant.update({
+        where: { id: tenant.id },
+        data: { subscriptionStatus: 'EXPIRED' },
+      });
+    }
+
+    // 4. Generate JWT
+    const payload = {
+      sub: user.id,
+      name: user.name,
+      username: user.username,
+      role: user.role,
+      tenantId: tenant.id,
+      schemaName: tenant.schemaName,
+      subscriptionStatus: currentStatus,
+    };
+
+    const accessToken = this.jwtService.sign(payload);
+
+    return {
+      accessToken,
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        role: user.role,
+      },
+      pharmacy: {
+        id: tenant.id,
+        name: tenant.name,
+        slug: tenant.slug,
+        governorate: tenant.governorate,
+        district: tenant.district,
+        phone: tenant.phone,
+        subscriptionStatus: currentStatus,
+        subscriptionEndsAt: tenant.subscriptionEndsAt,
+      },
+    };
+  }
+
+  async adminLogin(adminLoginDto: AdminLoginDto) {
+    const adminUser = this.configService.get<string>('ADMIN_USERNAME') || 'superadmin';
+    const adminPass = this.configService.get<string>('ADMIN_PASSWORD') || 'Admin@Dawaee2026';
+
+    if (
+      adminLoginDto.username !== adminUser ||
+      adminLoginDto.password !== adminPass
+    ) {
+      throw new UnauthorizedException('بيانات دخول لوحة الإدارة غير صحيحة');
+    }
+
+    const payload = {
+      sub: 'super-admin-root',
+      name: 'Super Admin',
+      username: adminUser,
+      role: 'SUPER_ADMIN',
+    };
+
+    const accessToken = this.jwtService.sign(payload);
+
+    return {
+      accessToken,
+      user: {
+        id: 'super-admin-root',
+        name: 'مدير النظام العام',
+        username: adminUser,
+        role: 'SUPER_ADMIN',
+      },
+    };
+  }
+}

@@ -1,0 +1,110 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { InventoryService } from './inventory.service';
+import {
+  BulkStockEntryDto,
+  UpdateItemPriceDto,
+  CreateSupplierDto,
+  UpdateSupplierDto,
+  RecordSupplierPaymentDto,
+} from './dto/bulk-stock-entry.dto';
+import { SubscriptionGuard } from '../../common/guards/subscription.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+
+@Controller('inventory')
+@UseGuards(AuthGuard('jwt'), SubscriptionGuard, RolesGuard)
+export class InventoryController {
+  constructor(private readonly inventoryService: InventoryService) {}
+
+  @Get()
+  async getPharmacyInventory(@Query() query: { search?: string }) {
+    return this.inventoryService.getPharmacyInventory(query);
+  }
+
+  @Get('summary')
+  async getInventorySummary() {
+    return this.inventoryService.getInventorySummary();
+  }
+
+  // Suppliers & Debts Endpoints
+  @Get('suppliers/summary')
+  @Roles('OWNER')
+  async getSuppliersSummary() {
+    return this.inventoryService.getSuppliersSummary();
+  }
+
+  @Get('suppliers')
+  async getSuppliers() {
+    return this.inventoryService.getSuppliers();
+  }
+
+  @Post('suppliers')
+  @Roles('OWNER')
+  async createSupplier(@Body() dto: CreateSupplierDto) {
+    return this.inventoryService.createSupplier(dto);
+  }
+
+  @Patch('suppliers/:id')
+  @Roles('OWNER')
+  async updateSupplier(
+    @Param('id') id: string,
+    @Body() dto: UpdateSupplierDto,
+  ) {
+    return this.inventoryService.updateSupplier(id, dto);
+  }
+
+  @Get('suppliers/:id/ledger')
+  @Roles('OWNER')
+  async getSupplierLedger(@Param('id') id: string) {
+    return this.inventoryService.getSupplierLedger(id);
+  }
+
+  @Post('suppliers/:id/pay')
+  @Roles('OWNER')
+  async recordSupplierPayment(
+    @Param('id') id: string,
+    @Body() dto: RecordSupplierPaymentDto,
+  ) {
+    return this.inventoryService.recordSupplierPayment(id, dto);
+  }
+
+  @Get('low-stock')
+  async getLowStockAlerts() {
+    return this.inventoryService.getLowStockAlerts();
+  }
+
+  @Get('expiring-soon')
+  async getExpiringSoonAlerts(@Query('months') months?: number) {
+    return this.inventoryService.getExpiringSoonAlerts(months ? Number(months) : 3);
+  }
+
+  @Get(':id/batches')
+  async getItemBatches(@Param('id') id: string) {
+    return this.inventoryService.getItemBatches(id);
+  }
+
+  @Post('bulk-entry')
+  @Roles('OWNER')
+  async bulkStockEntry(@Body() dto: BulkStockEntryDto) {
+    return this.inventoryService.bulkStockEntry(dto);
+  }
+
+  @Patch(':id/price')
+  @Roles('OWNER')
+  async updateItemPrice(
+    @Param('id') id: string,
+    @Body() dto: UpdateItemPriceDto,
+  ) {
+    return this.inventoryService.updateItemPrice(id, dto);
+  }
+}
