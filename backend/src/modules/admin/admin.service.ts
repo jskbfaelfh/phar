@@ -81,24 +81,60 @@ export class AdminService {
 
   /**
    * Get all users/accounts for a specific pharmacy (Owner, Cashier)
+   * Auto-provisions schema and default accounts if pharmacy was seeded without full schema.
    */
   async getTenantUsers(tenantId: string) {
     const tenant = await this.getTenantById(tenantId);
 
-    const users: any[] = await this.prisma.$queryRawUnsafe(`
-      SELECT id, name, username, role, is_active, created_at
-      FROM "${tenant.schemaName}".users
-      ORDER BY role ASC, created_at ASC;
-    `);
+    try {
+      // 1. Check if the schema and users table exist
+      const checkTable: any[] = await this.prisma.$queryRawUnsafe(`
+        SELECT to_regclass('"${tenant.schemaName}".users') as table_exists;
+      `);
 
-    return {
-      tenant: {
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant.slug,
-      },
-      users,
-    };
+      if (!checkTable[0] || !checkTable[0].table_exists) {
+        // Auto-provision schema on demand
+        await this.provisioningService.createTenantSchemaAndTables(tenant.schemaName);
+
+        // Create default owner and cashier with standard password (123456)
+        const defaultPasswordHash = await bcrypt.hash('123456', 10);
+        const ownerUserId = crypto.randomUUID();
+        const cashierUserId = crypto.randomUUID();
+
+        await this.prisma.$executeRawUnsafe(`
+          INSERT INTO "${tenant.schemaName}".users (id, name, username, password_hash, role, is_active, created_at)
+          VALUES 
+            ('${ownerUserId}'::uuid, 'المالك - ${tenant.name.replace(/'/g, "''")}', '${tenant.slug}', '${defaultPasswordHash}', 'OWNER', TRUE, NOW()),
+            ('${cashierUserId}'::uuid, 'كاشير - ${tenant.name.replace(/'/g, "''")}', '${tenant.slug}_pos', '${defaultPasswordHash}', 'CASHIER', TRUE, NOW())
+          ON CONFLICT (username) DO NOTHING;
+        `);
+      }
+
+      const users: any[] = await this.prisma.$queryRawUnsafe(`
+        SELECT id, name, username, role, is_active, created_at
+        FROM "${tenant.schemaName}".users
+        ORDER BY role ASC, created_at ASC;
+      `);
+
+      return {
+        tenant: {
+          id: tenant.id,
+          name: tenant.name,
+          slug: tenant.slug,
+        },
+        users,
+      };
+    } catch (err: any) {
+      this.logger.error(`Error retrieving users for tenant ${tenant.slug}: ${err.message}`);
+      return {
+        tenant: {
+          id: tenant.id,
+          name: tenant.name,
+          slug: tenant.slug,
+        },
+        users: [],
+      };
+    }
   }
 
   /**
@@ -106,6 +142,16 @@ export class AdminService {
    */
   async resetTenantUserPassword(tenantId: string, userId: string, dto: ResetPasswordDto) {
     const tenant = await this.getTenantById(tenantId);
+
+    // Ensure table exists
+    const checkTable: any[] = await this.prisma.$queryRawUnsafe(`
+      SELECT to_regclass('"${tenant.schemaName}".users') as table_exists;
+    `);
+
+    if (!checkTable[0] || !checkTable[0].table_exists) {
+      await this.provisioningService.createTenantSchemaAndTables(tenant.schemaName);
+    }
+
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
 
     const updated = await this.prisma.$executeRawUnsafe(`
