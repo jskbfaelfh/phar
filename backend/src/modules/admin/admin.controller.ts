@@ -20,12 +20,16 @@ import {
 } from './dto/create-tenant.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { R2BackupService } from '../backup/r2-backup.service';
 
 @Controller('admin')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles('SUPER_ADMIN')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly r2BackupService: R2BackupService,
+  ) {}
 
   @Post('tenants')
   async createTenant(@Body() dto: CreateTenantDto) {
@@ -88,5 +92,41 @@ export class AdminController {
   @Get('dashboard')
   async getDashboard() {
     return this.adminService.getDashboardMetrics();
+  }
+
+  @Get('backups/status')
+  async getBackupsStatus() {
+    return this.r2BackupService.getBackupsMonitoringSummary();
+  }
+
+  @Post('backups/run-job')
+  async runBackupsJob() {
+    return this.r2BackupService.runDailyBackupJob();
+  }
+
+  @Patch('tenants/:id/r2-config')
+  async updateTenantR2Config(
+    @Param('id') id: string,
+    @Body() dto: { r2BucketName?: string; r2AccountId?: string; r2AccessKeyId?: string; r2SecretAccessKey?: string },
+  ) {
+    return this.adminService.updateTenantR2Config(id, dto);
+  }
+
+  @Get('settings/master-r2')
+  async getMasterR2Config() {
+    return this.r2BackupService.getMasterR2Config();
+  }
+
+  @Post('settings/master-r2')
+  async saveMasterR2Config(
+    @Body()
+    dto: {
+      r2BucketName: string;
+      r2AccountId: string;
+      r2AccessKeyId: string;
+      r2SecretAccessKey: string;
+    },
+  ) {
+    return this.r2BackupService.saveMasterR2Config(dto);
   }
 }

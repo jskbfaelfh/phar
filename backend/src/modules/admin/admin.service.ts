@@ -265,4 +265,32 @@ export class AdminService {
       },
     };
   }
+
+  /**
+   * Configure Cloudflare R2 bucket credentials for a specific tenant
+   */
+  async updateTenantR2Config(
+    id: string,
+    dto: {
+      r2BucketName?: string;
+      r2AccountId?: string;
+      r2AccessKeyId?: string;
+      r2SecretAccessKey?: string;
+    },
+  ) {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id } });
+    if (!tenant) {
+      throw new NotFoundException('الصيدلية غير موجودة');
+    }
+
+    return this.prisma.tenant.update({
+      where: { id },
+      data: {
+        r2BucketName: dto.r2BucketName || null,
+        r2AccountId: dto.r2AccountId || null,
+        r2AccessKeyId: dto.r2AccessKeyId || null,
+        r2SecretAccessKey: dto.r2SecretAccessKey || null,
+      },
+    });
+  }
 }

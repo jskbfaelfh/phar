@@ -38,6 +38,12 @@ model Tenant {
   licenseKey         String             @unique @map("license_key") @db.VarChar(255)
   subscriptionStatus SubscriptionStatus @default(ACTIVE) @map("subscription_status")
   subscriptionEndsAt DateTime           @map("subscription_ends_at")
+  lastBackupAt       DateTime?          @map("last_backup_at")
+  backupStatus       String?            @default("PENDING") @map("backup_status") @db.VarChar(50)
+  r2BucketName       String?            @map("r2_bucket_name") @db.VarChar(255)
+  r2AccountId        String?            @map("r2_account_id") @db.VarChar(255)
+  r2AccessKeyId      String?            @map("r2_access_key_id") @db.VarChar(255)
+  r2SecretAccessKey  String?            @map("r2_secret_access_key") @db.Text
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
 
@@ -92,6 +98,16 @@ model CentralSearchIndex {
   @@index([tradeName])
   @@index([scientificName])
   @@map("central_search_index")
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique @db.VarChar(100)
+  value     String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
 }
 
 // ==========================================
