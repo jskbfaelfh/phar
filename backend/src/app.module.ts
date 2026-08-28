@@ -11,6 +11,7 @@ import { SearchModule } from './modules/search/search.module';
 import { PosModule } from './modules/pos/pos.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { ProfileModule } from './modules/profile/profile.module';
+import { BackupModule } from './modules/backup/backup.module';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -30,6 +31,7 @@ import { AppService } from './app.service';
     PosModule,
     ReportsModule,
     ProfileModule,
+    BackupModule,
   ],
   controllers: [AppController],
   providers: [

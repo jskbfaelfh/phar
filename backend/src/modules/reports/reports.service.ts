@@ -187,4 +187,159 @@ export class ReportsService {
       expectedProfit,
     };
   }
+
+  /**
+   * Detailed Current Stocktake List
+   */
+  async getDetailedCurrentStocktake() {
+    const schemaName = this.tenantContext.getSchemaName();
+
+    const sql = `
+      SELECT 
+        ii.id as "inventoryItemId",
+        ii.medicine_id as "medicineId",
+        m.trade_name as "tradeName",
+        m.scientific_name as "scientificName",
+        m.dosage_form as "dosageForm",
+        m.strength,
+        m.barcode,
+        ii.custom_name as "customName",
+        ii.units_per_pack as "unitsPerPack",
+        ii.selling_price_pack as "sellingPricePack",
+        ii.selling_price_unit as "sellingPriceUnit",
+        ii.min_alert_units as "minAlertUnits",
+        COALESCE(SUM(b.quantity_units_remaining), 0)::int as "totalUnitsRemaining",
+        FLOOR(COALESCE(SUM(b.quantity_units_remaining), 0)::numeric / GREATEST(ii.units_per_pack, 1))::int as "fullPacksRemaining",
+        (COALESCE(SUM(b.quantity_units_remaining), 0) % GREATEST(ii.units_per_pack, 1))::int as "looseUnitsRemaining",
+        COALESCE(AVG(b.purchase_price_pack), 0)::numeric as "avgCostPack",
+        COALESCE(SUM((b.quantity_units_remaining::numeric / GREATEST(ii.units_per_pack, 1)) * b.purchase_price_pack), 0)::numeric as "totalCostValue",
+        COALESCE(SUM((b.quantity_units_remaining::numeric / GREATEST(ii.units_per_pack, 1)) * ii.selling_price_pack), 0)::numeric as "totalRetailValue"
+      FROM "${schemaName}".inventory_items ii
+      JOIN public.medicines m ON ii.medicine_id = m.id
+      LEFT JOIN "${schemaName}".inventory_batches b ON ii.id = b.inventory_item_id AND b.quantity_units_remaining > 0
+      GROUP BY ii.id, m.id
+      ORDER BY m.trade_name ASC;
+    `;
+
+    const items: any[] = await this.prisma.$queryRawUnsafe(sql);
+    return items;
+  }
+
+  /**
+   * Sold Medicines Outflow Stocktake (Daily, Weekly, Monthly, Yearly)
+   */
+  async getSoldMedicinesStocktake(dto: DateRangeDto) {
+    const schemaName = this.tenantContext.getSchemaName();
+
+    let dateFilter = '';
+    const params: any[] = [];
+
+    if (dto.from && dto.to) {
+      params.push(`${dto.from} 00:00:00`, `${dto.to} 23:59:59`);
+      dateFilter = `WHERE s.created_at >= $1::timestamp AND s.created_at <= $2::timestamp`;
+    } else if (dto.from) {
+      params.push(`${dto.from} 00:00:00`);
+      dateFilter = `WHERE s.created_at >= $1::timestamp`;
+    }
+
+    const sql = `
+      SELECT 
+        m.id as "medicineId",
+        m.trade_name as "tradeName",
+        m.scientific_name as "scientificName",
+        m.dosage_form as "dosageForm",
+        m.barcode,
+        ii.units_per_pack as "unitsPerPack",
+        COUNT(DISTINCT s.id)::int as "invoicesCount",
+        SUM(CASE WHEN si.unit_type = 'PACK' THEN si.quantity ELSE 0 END)::int as "soldPacks",
+        SUM(CASE WHEN si.unit_type = 'STRIP' THEN si.quantity ELSE 0 END)::int as "soldStrips",
+        COALESCE(SUM(
+          CASE 
+            WHEN si.unit_type = 'PACK' THEN si.quantity * COALESCE(b.purchase_price_pack, 0)
+            ELSE (si.quantity::numeric / GREATEST(ii.units_per_pack, 1)) * COALESCE(b.purchase_price_pack, 0)
+          END
+        ), 0)::numeric as "totalCost",
+        COALESCE(SUM(si.total_price), 0)::numeric as "totalRevenue",
+        COALESCE(SUM(si.total_price), 0)::numeric - COALESCE(SUM(
+          CASE 
+            WHEN si.unit_type = 'PACK' THEN si.quantity * COALESCE(b.purchase_price_pack, 0)
+            ELSE (si.quantity::numeric / GREATEST(ii.units_per_pack, 1)) * COALESCE(b.purchase_price_pack, 0)
+          END
+        ), 0)::numeric as "totalProfit"
+      FROM "${schemaName}".sale_items si
+      JOIN "${schemaName}".sales s ON si.sale_id = s.id
+      JOIN "${schemaName}".inventory_items ii ON si.inventory_item_id = ii.id
+      JOIN public.medicines m ON ii.medicine_id = m.id
+      LEFT JOIN "${schemaName}".inventory_batches b ON si.inventory_batch_id = b.id
+      ${dateFilter}
+      GROUP BY m.id, ii.id
+      ORDER BY "totalRevenue" DESC;
+    `;
+
+    const items: any[] = await this.prisma.$queryRawUnsafe(sql, ...params);
+    return items;
+  }
+
+  /**
+   * Periodic Debts & Supplier Invoices Report
+   */
+  async getDebtsReport(dto: DateRangeDto) {
+    const schemaName = this.tenantContext.getSchemaName();
+
+    let dateFilter = '';
+    const params: any[] = [];
+
+    if (dto.from && dto.to) {
+      params.push(`${dto.from} 00:00:00`, `${dto.to} 23:59:59`);
+      dateFilter = `WHERE si.invoice_date >= $1::date AND si.invoice_date <= $2::date`;
+    } else if (dto.from) {
+      params.push(`${dto.from} 00:00:00`);
+      dateFilter = `WHERE si.invoice_date >= $1::date`;
+    }
+
+    try {
+      const sql = `
+        SELECT 
+          s.id as "supplierId",
+          s.name as "supplierName",
+          s.phone,
+          COUNT(si.id)::int as "invoicesCount",
+          COALESCE(SUM(si.total_amount), 0)::numeric as "totalPurchases",
+          COALESCE(SUM(si.paid_amount), 0)::numeric as "totalPaid",
+          COALESCE(SUM(si.remaining_amount), 0)::numeric as "remainingDebt"
+        FROM "${schemaName}".suppliers s
+        LEFT JOIN "${schemaName}".supplier_invoices si ON s.id = si.supplier_id
+        ${dateFilter}
+        GROUP BY s.id
+        ORDER BY "remainingDebt" DESC;
+      `;
+
+      const suppliersReport: any[] = await this.prisma.$queryRawUnsafe(sql, ...params);
+
+      // Summary
+      let totalPurchases = 0;
+      let totalPaid = 0;
+      let totalRemainingDebt = 0;
+      for (const sup of suppliersReport) {
+        totalPurchases += Number(sup.totalPurchases || 0);
+        totalPaid += Number(sup.totalPaid || 0);
+        totalRemainingDebt += Number(sup.remainingDebt || 0);
+      }
+
+      return {
+        summary: {
+          totalPurchases,
+          totalPaid,
+          totalRemainingDebt,
+          totalSuppliers: suppliersReport.length,
+        },
+        suppliers: suppliersReport,
+      };
+    } catch {
+      return {
+        summary: { totalPurchases: 0, totalPaid: 0, totalRemainingDebt: 0, totalSuppliers: 0 },
+        suppliers: [],
+      };
+    }
+  }
 }

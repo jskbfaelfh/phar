@@ -12,6 +12,11 @@ import {
   Receipt,
   X,
   RefreshCw,
+  HardDrive,
+  FolderDown,
+  Download,
+  Upload,
+  Clock,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { IRAQ_LOCATIONS, type GovernorateData } from '../data/iraq-locations';
@@ -21,6 +26,15 @@ export const PharmacyProfileView: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [profileData, setProfileData] = useState<any | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Backup & Restore states
+  const [dirHandle, setDirHandle] = useState<any | null>(null);
+  const [dirName, setDirName] = useState<string | null>(() => localStorage.getItem('dawaee_backup_dirname'));
+  const [autoBackup, setAutoBackup] = useState<boolean>(() => localStorage.getItem('dawaee_auto_backup') !== 'false');
+  const [lastBackup, setLastBackup] = useState<string | null>(() => localStorage.getItem('dawaee_last_backup'));
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [restoreLoading, setRestoreLoading] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Pharmacy details form
   const [pharmacyForm, setPharmacyForm] = useState({
@@ -80,6 +94,93 @@ export const PharmacyProfileView: React.FC = () => {
   useEffect(() => {
     fetchProfile();
   }, []);
+
+  // 1. Select Local Backup Folder (File System Access API)
+  const handleSelectFolder = async () => {
+    try {
+      if ('showDirectoryPicker' in window) {
+        const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+        setDirHandle(handle);
+        setDirName(handle.name);
+        localStorage.setItem('dawaee_backup_dirname', handle.name);
+        setBackupMessage({ type: 'success', text: `تم اعتماد المجلد: ${handle.name}` });
+      } else {
+        alert('المتصفح الحالي لا يدعم اختيار المجلد المباشر، سيتم حفظ الملفات في مجلد التنزيلات الافتراضي');
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.error(err);
+      }
+    }
+  };
+
+  // 2. Export / Save Backup to Folder or Download
+  const handleExportBackup = async () => {
+    setBackupLoading(true);
+    setBackupMessage(null);
+    try {
+      const data = await apiRequest<any>('/backup/export');
+      const jsonStr = JSON.stringify(data, null, 2);
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const timeStr = new Date().toTimeString().slice(0, 5).replace(':', '-');
+      const fileName = `Dawaee_Backup_${dateStr}_${timeStr}.json`;
+
+      if (dirHandle) {
+        const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(jsonStr);
+        await writable.close();
+        setBackupMessage({ type: 'success', text: `تم حفظ النسخة بنجاح في مجلد (${dirHandle.name})` });
+      } else {
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+        setBackupMessage({ type: 'success', text: 'تم تنزيل النسخة الاحتياطية بنجاح' });
+      }
+      const nowStr = new Date().toLocaleString('ar-IQ');
+      setLastBackup(nowStr);
+      localStorage.setItem('dawaee_last_backup', nowStr);
+    } catch (err: any) {
+      console.error(err);
+      setBackupMessage({ type: 'error', text: err.message || 'فشل إنشاء النسخة الاحتياطية' });
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  // 3. Restore Backup from JSON file
+  const handleRestoreFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!confirm('هل أنت متأكد من استعادة هذه النسخة الاحتياطية؟ سيتم تحديث وتثبيت كافة بيانات المواد والفواتير.')) {
+      e.target.value = '';
+      return;
+    }
+
+    setRestoreLoading(true);
+    setBackupMessage(null);
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const res = await apiRequest<any>('/backup/restore', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      setBackupMessage({ type: 'success', text: res.message || 'تمت استعادة النسخة الاحتياطية بنجاح!' });
+      fetchProfile();
+    } catch (err: any) {
+      console.error(err);
+      setBackupMessage({ type: 'error', text: err.message || 'فشل استعادة النسخة الاحتياطية، تأكد من صحة الملف' });
+    } finally {
+      setRestoreLoading(false);
+      e.target.value = '';
+    }
+  };
 
   // Handle Logo Upload via file
   const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -336,6 +437,107 @@ export const PharmacyProfileView: React.FC = () => {
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                 />
               </div>
+            </div>
+          </div>
+
+          {/* 2. Backup & Restore Card */}
+          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
+                <HardDrive className="w-5 h-5 text-indigo-600" />
+                النسخ الاحتياطي
+              </h3>
+              <span className="text-[10px] px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full font-bold">
+                محلي + آمن
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              حفظ نسخة كاملة من بيانات الصيدلية (المخزون، الفواتير، الديون) داخل مجلد في حاسوبك يومياً.
+            </p>
+
+            {backupMessage && (
+              <div
+                className={`p-3 rounded-xl text-xs font-bold ${
+                  backupMessage.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                    : 'bg-rose-50 text-rose-800 border border-rose-200'
+                }`}
+              >
+                {backupMessage.text}
+              </div>
+            )}
+
+            {/* Folder Selection Box */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-700">مجلد الحفظ في الحاسوب:</span>
+                {dirName ? (
+                  <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-md font-bold text-[11px]">
+                    📁 {dirName}
+                  </span>
+                ) : (
+                  <span className="text-slate-400 text-[11px]">غير محدد</span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSelectFolder}
+                className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <FolderDown className="w-4 h-4" />
+                {dirName ? 'تغيير المجلد' : 'اختيار مجلد النسخ'}
+              </button>
+            </div>
+
+            {/* Daily Auto-Backup Toggle */}
+            <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div>
+                <div className="text-xs font-black text-slate-800">النسخ التلقائي اليومي</div>
+                <div className="text-[10px] text-slate-400">حفظ تلقائي عند إغلاق الوردية</div>
+              </div>
+              <input
+                type="checkbox"
+                checked={autoBackup}
+                onChange={(e) => {
+                  setAutoBackup(e.target.checked);
+                  localStorage.setItem('dawaee_auto_backup', String(e.target.checked));
+                }}
+                className="w-4 h-4 text-indigo-600 rounded-sm cursor-pointer"
+              />
+            </div>
+
+            {/* Last Backup Info */}
+            <div className="text-[11px] text-slate-500 flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5 text-slate-400" />
+              <span>آخر نسخة:</span>
+              <span className="font-bold text-slate-700">{lastBackup || 'لا توجد نسخة سابقة'}</span>
+            </div>
+
+            {/* Action Buttons: Export & Restore */}
+            <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={backupLoading}
+                onClick={handleExportBackup}
+                className="py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95 disabled:opacity-50"
+              >
+                <Download className="w-4 h-4" />
+                {backupLoading ? 'جاري الحفظ...' : 'حفظ نسخة'}
+              </button>
+
+              <label className="py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95 text-center">
+                <Upload className="w-4 h-4" />
+                <span>{restoreLoading ? 'جاري الاستعادة...' : 'استعادة'}</span>
+                <input
+                  type="file"
+                  accept=".json"
+                  disabled={restoreLoading}
+                  onChange={handleRestoreFile}
+                  className="hidden"
+                />
+              </label>
             </div>
           </div>
         </div>

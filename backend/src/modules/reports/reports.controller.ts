@@ -26,4 +26,19 @@ export class ReportsController {
   async getInventoryValuation() {
     return this.reportsService.getInventoryValuation();
   }
+
+  @Get('stocktake/current')
+  async getDetailedCurrentStocktake() {
+    return this.reportsService.getDetailedCurrentStocktake();
+  }
+
+  @Get('stocktake/sold')
+  async getSoldMedicinesStocktake(@Query() query: DateRangeDto) {
+    return this.reportsService.getSoldMedicinesStocktake(query);
+  }
+
+  @Get('debts/summary')
+  async getDebtsReport(@Query() query: DateRangeDto) {
+    return this.reportsService.getDebtsReport(query);
+  }
 }
