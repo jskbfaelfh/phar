@@ -233,37 +233,50 @@ export class AdminService {
     return updated;
   }
 
+  private static dashboardCache: { data: any; expiry: number } | null = null;
+
   /**
-   * Super Admin Dashboard Overview Metrics
+   * Super Admin Dashboard Overview Metrics (Aggregated Single-Query & In-Memory Cache)
    */
   async getDashboardMetrics() {
-    const totalTenants = await this.prisma.tenant.count();
-    const activeTenants = await this.prisma.tenant.count({
-      where: { subscriptionStatus: 'ACTIVE' },
-    });
-    const expiredTenants = await this.prisma.tenant.count({
-      where: { subscriptionStatus: 'EXPIRED' },
-    });
-    const suspendedTenants = await this.prisma.tenant.count({
-      where: { subscriptionStatus: 'SUSPENDED' },
-    });
-    const totalMedicines = await this.prisma.medicine.count();
-    const totalIndexedStock = await this.prisma.centralSearchIndex.count({
-      where: { isAvailable: true },
-    });
+    const now = Date.now();
+    if (AdminService.dashboardCache && AdminService.dashboardCache.expiry > now) {
+      return AdminService.dashboardCache.data;
+    }
 
-    return {
+    const [tenantStats, totalMedicines, totalIndexedStock] = await Promise.all([
+      this.prisma.$queryRawUnsafe<any[]>(`
+        SELECT 
+          COUNT(*)::int as total,
+          COUNT(*) FILTER (WHERE subscription_status = 'ACTIVE')::int as active,
+          COUNT(*) FILTER (WHERE subscription_status = 'EXPIRED')::int as expired,
+          COUNT(*) FILTER (WHERE subscription_status = 'SUSPENDED')::int as suspended
+        FROM tenants;
+      `),
+      this.prisma.medicine.count(),
+      this.prisma.centralSearchIndex.count({ where: { isAvailable: true } }),
+    ]);
+
+    const stats = tenantStats[0] || {};
+    const result = {
       tenants: {
-        total: totalTenants,
-        active: activeTenants,
-        expired: expiredTenants,
-        suspended: suspendedTenants,
+        total: Number(stats.total || 0),
+        active: Number(stats.active || 0),
+        expired: Number(stats.expired || 0),
+        suspended: Number(stats.suspended || 0),
       },
       catalog: {
         totalMedicines,
         totalActiveSearchItems: totalIndexedStock,
       },
     };
+
+    AdminService.dashboardCache = {
+      data: result,
+      expiry: now + 15000, // 15 seconds cache
+    };
+
+    return result;
   }
 
   /**

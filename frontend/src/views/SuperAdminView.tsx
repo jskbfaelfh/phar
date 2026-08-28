@@ -137,9 +137,12 @@ export const SuperAdminView: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchData();
-    fetchBackupsData();
-  }, []);
+    if (activeAdminTab === 'tenants') {
+      fetchData();
+    } else if (activeAdminTab === 'backups') {
+      fetchBackupsData();
+    }
+  }, [activeAdminTab]);
 
   const handleRunBackupJob = async () => {
     if (!confirm('هل تريد تشغيل عملية النسخ السحابي اليومي الآن لكافة الصيدليات؟')) return;

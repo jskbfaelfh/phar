@@ -63,10 +63,17 @@ export class SearchService {
     };
   }
 
+  private static locationsCache: { data: any[]; expiry: number } | null = null;
+
   /**
-   * Get list of governorates and districts available in the network
+   * Get list of governorates and districts available in the network (Cached in-memory)
    */
   async getAvailableLocations() {
+    const now = Date.now();
+    if (SearchService.locationsCache && SearchService.locationsCache.expiry > now) {
+      return SearchService.locationsCache.data;
+    }
+
     const locations = await this.prisma.centralSearchIndex.findMany({
       where: { isAvailable: true },
       select: {
@@ -75,6 +82,11 @@ export class SearchService {
       },
       distinct: ['governorate', 'district'],
     });
+
+    SearchService.locationsCache = {
+      data: locations,
+      expiry: now + 5 * 60 * 1000, // 5 minutes cache
+    };
 
     return locations;
   }

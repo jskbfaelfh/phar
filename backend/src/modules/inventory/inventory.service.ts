@@ -20,6 +20,7 @@ import {
 @Injectable()
 export class InventoryService {
   private readonly logger = new Logger(InventoryService.name);
+  private static readonly verifiedSchemas = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -30,65 +31,73 @@ export class InventoryService {
 
   /**
    * Helper to ensure suppliers & purchases tables & custom_name column exist in the tenant schema
+   * Runs only ONCE per schema to eliminate massive DDL round-trip latency on subsequent calls.
    */
   private async ensurePurchaseTablesExist(schemaName: string) {
-    const ddl = [
-      `ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS custom_name VARCHAR(255);`,
-      `CREATE TABLE IF NOT EXISTS "${schemaName}".suppliers (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        name VARCHAR(255) NOT NULL,
-        phone VARCHAR(50),
-        address TEXT,
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      )`,
-      `CREATE TABLE IF NOT EXISTS "${schemaName}".purchases (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        invoice_number VARCHAR(100),
-        supplier_id UUID,
-        supplier_name VARCHAR(255),
-        total_gross_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-        total_discount_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-        net_total_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-        paid_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-        remaining_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-        payment_status VARCHAR(20) NOT NULL DEFAULT 'PAID',
-        due_date DATE,
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      )`,
-      `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_purchases_dt" ON "${schemaName}".purchases (created_at)`,
-      `CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_items (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        purchase_id UUID,
-        inventory_item_id UUID,
-        quantity_packs INT NOT NULL,
-        bonus_packs INT NOT NULL DEFAULT 0,
-        units_per_pack INT NOT NULL DEFAULT 1,
-        purchase_price_pack DECIMAL(12, 2) NOT NULL,
-        discount_percent DECIMAL(5, 2) NOT NULL DEFAULT 0,
-        net_cost_pack DECIMAL(12, 2) NOT NULL,
-        selling_price_pack DECIMAL(12, 2) NOT NULL,
-        selling_price_unit DECIMAL(12, 2) NOT NULL,
-        expiry_date DATE,
-        batch_number VARCHAR(100)
-      )`,
-      `CREATE TABLE IF NOT EXISTS "${schemaName}".supplier_payments (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        supplier_id UUID,
-        purchase_id UUID,
-        amount DECIMAL(12, 2) NOT NULL,
-        payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
-        payment_method VARCHAR(50) DEFAULT 'CASH',
-        receipt_number VARCHAR(100),
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      )`,
-      `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_supp_pay_dt" ON "${schemaName}".supplier_payments (created_at)`,
-    ];
+    if (InventoryService.verifiedSchemas.has(schemaName)) {
+      return;
+    }
 
-    for (const sql of ddl) {
-      await this.prisma.$executeRawUnsafe(sql);
+    try {
+      const ddl = `
+        ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS custom_name VARCHAR(255);
+        CREATE TABLE IF NOT EXISTS "${schemaName}".suppliers (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          name VARCHAR(255) NOT NULL,
+          phone VARCHAR(50),
+          address TEXT,
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS "${schemaName}".purchases (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          invoice_number VARCHAR(100),
+          supplier_id UUID,
+          supplier_name VARCHAR(255),
+          total_gross_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+          total_discount_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+          net_total_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+          paid_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+          remaining_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+          payment_status VARCHAR(20) NOT NULL DEFAULT 'PAID',
+          due_date DATE,
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS "idx_${schemaName}_purchases_dt" ON "${schemaName}".purchases (created_at);
+        CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_items (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          purchase_id UUID,
+          inventory_item_id UUID,
+          quantity_packs INT NOT NULL,
+          bonus_packs INT NOT NULL DEFAULT 0,
+          units_per_pack INT NOT NULL DEFAULT 1,
+          purchase_price_pack DECIMAL(12, 2) NOT NULL,
+          discount_percent DECIMAL(5, 2) NOT NULL DEFAULT 0,
+          net_cost_pack DECIMAL(12, 2) NOT NULL,
+          selling_price_pack DECIMAL(12, 2) NOT NULL,
+          selling_price_unit DECIMAL(12, 2) NOT NULL,
+          expiry_date DATE,
+          batch_number VARCHAR(100)
+        );
+        CREATE TABLE IF NOT EXISTS "${schemaName}".supplier_payments (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          supplier_id UUID,
+          purchase_id UUID,
+          amount DECIMAL(12, 2) NOT NULL,
+          payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+          payment_method VARCHAR(50) DEFAULT 'CASH',
+          receipt_number VARCHAR(100),
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS "idx_${schemaName}_supp_pay_dt" ON "${schemaName}".supplier_payments (created_at);
+      `;
+
+      await this.prisma.$executeRawUnsafe(ddl);
+      InventoryService.verifiedSchemas.add(schemaName);
+    } catch (err: any) {
+      this.logger.warn(`Could not verify purchase tables for ${schemaName}: ${err.message}`);
     }
   }
 
@@ -433,31 +442,30 @@ export class InventoryService {
     const schemaName = this.tenantContext.getSchemaName();
     await this.ensurePurchaseTablesExist(schemaName);
 
-    // 1. Total Distinct Medicines in pharmacy
-    const totalRes: any[] = await this.prisma.$queryRawUnsafe(
-      `SELECT COUNT(id)::int as count FROM "${schemaName}".inventory_items;`,
-    );
-
-    // 2. Low Stock Count
-    const lowStockRes: any[] = await this.prisma.$queryRawUnsafe(`
-      SELECT i.id
-      FROM "${schemaName}".inventory_items i
-      LEFT JOIN "${schemaName}".inventory_batches b ON i.id = b.inventory_item_id
-      GROUP BY i.id, i.min_alert_units
-      HAVING COALESCE(SUM(b.quantity_units_remaining), 0) <= i.min_alert_units;
-    `);
-
-    // 3. Expiring Soon Count (within 3 months)
-    const expRes: any[] = await this.prisma.$queryRawUnsafe(`
-      SELECT COUNT(id)::int as count
-      FROM "${schemaName}".inventory_batches
-      WHERE quantity_units_remaining > 0 
-        AND expiry_date <= (CURRENT_DATE + interval '3 months');
-    `);
+    const [totalRes, lowStockRes, expRes] = await Promise.all([
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT COUNT(id)::int as count FROM "${schemaName}".inventory_items;`,
+      ),
+      this.prisma.$queryRawUnsafe<any[]>(`
+        SELECT COUNT(*)::int as count FROM (
+          SELECT i.id
+          FROM "${schemaName}".inventory_items i
+          LEFT JOIN "${schemaName}".inventory_batches b ON i.id = b.inventory_item_id
+          GROUP BY i.id, i.min_alert_units
+          HAVING COALESCE(SUM(b.quantity_units_remaining), 0) <= i.min_alert_units
+        ) sub;
+      `),
+      this.prisma.$queryRawUnsafe<any[]>(`
+        SELECT COUNT(id)::int as count
+        FROM "${schemaName}".inventory_batches
+        WHERE quantity_units_remaining > 0 
+          AND expiry_date <= (CURRENT_DATE + interval '3 months');
+      `),
+    ]);
 
     return {
       totalMedicines: totalRes[0]?.count || 0,
-      lowStockCount: lowStockRes?.length || 0,
+      lowStockCount: lowStockRes[0]?.count || 0,
       expiringSoonCount: expRes[0]?.count || 0,
     };
   }
