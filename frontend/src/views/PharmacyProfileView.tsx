@@ -17,6 +17,11 @@ import {
   Download,
   Upload,
   Clock,
+  Globe,
+  Eye,
+  MessageCircle,
+  PhoneCall,
+  Moon,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { IRAQ_LOCATIONS, type GovernorateData } from '../data/iraq-locations';
@@ -47,6 +52,11 @@ export const PharmacyProfileView: React.FC = () => {
     logoUrl: '',
     receiptHeader: '',
     receiptFooter: '',
+    isSearchVisible: true,
+    showSellingPrices: true,
+    showPhoneNumber: true,
+    showWhatsapp: true,
+    is24Hours: false,
   });
 
   // Owner password form
@@ -81,6 +91,11 @@ export const PharmacyProfileView: React.FC = () => {
           logoUrl: data.pharmacy.logoUrl || '',
           receiptHeader: data.pharmacy.receiptHeader || '',
           receiptFooter: data.pharmacy.receiptFooter || '',
+          isSearchVisible: data.pharmacy.isSearchVisible ?? true,
+          showSellingPrices: data.pharmacy.showSellingPrices ?? true,
+          showPhoneNumber: data.pharmacy.showPhoneNumber ?? true,
+          showWhatsapp: data.pharmacy.showWhatsapp ?? true,
+          is24Hours: data.pharmacy.is24Hours ?? false,
         });
       }
     } catch (err: any) {
@@ -616,28 +631,103 @@ export const PharmacyProfileView: React.FC = () => {
               </div>
             </div>
 
-            {/* Address Details & Google Maps */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">العنوان التفصيلي ونقطة دالة</label>
-                <input
-                  type="text"
-                  value={pharmacyForm.addressDetails}
-                  onChange={(e) => setPharmacyForm({ ...pharmacyForm, addressDetails: e.target.value })}
-                  placeholder="مثال: شارع المشجر - قرب جامع النور"
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm"
-                />
+            {/* Network Search & Privacy Controls Card */}
+            <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-indigo-100/60">
+                <div className="flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-indigo-600" />
+                  <h4 className="text-xs font-black text-slate-900">إعدادات الخصوصية والبحث الشبكي للجمهور</h4>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full font-extrabold">
+                  تحكم كامل
+                </span>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">رابط خرائط جوجل (Google Maps)</label>
-                <input
-                  type="text"
-                  value={pharmacyForm.googleMapsUrl}
-                  onChange={(e) => setPharmacyForm({ ...pharmacyForm, googleMapsUrl: e.target.value })}
-                  placeholder="https://maps.app.goo.gl/..."
-                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono text-xs"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* 1. Global Visibility Toggle */}
+                <label className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl cursor-pointer hover:border-indigo-300 transition-colors">
+                  <div className="flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-slate-500" />
+                    <div>
+                      <div className="text-xs font-black text-slate-800">الظهور في البحث العام</div>
+                      <div className="text-[10px] text-slate-400">إتاحة ظهور الصيدلية للمواطنين</div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={pharmacyForm.isSearchVisible}
+                    onChange={(e) => setPharmacyForm({ ...pharmacyForm, isSearchVisible: e.target.checked })}
+                    className="w-4 h-4 text-indigo-600 rounded-sm cursor-pointer"
+                  />
+                </label>
+
+                {/* 2. Selling Price Visibility Toggle */}
+                <label className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl cursor-pointer hover:border-indigo-300 transition-colors">
+                  <div className="flex items-center gap-2">
+                    <Eye className="w-4 h-4 text-slate-500" />
+                    <div>
+                      <div className="text-xs font-black text-slate-800">إظهار أسعار الأدوية</div>
+                      <div className="text-[10px] text-slate-400">عرض أسعار البيع للجمهور بالبحث</div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={pharmacyForm.showSellingPrices}
+                    onChange={(e) => setPharmacyForm({ ...pharmacyForm, showSellingPrices: e.target.checked })}
+                    className="w-4 h-4 text-indigo-600 rounded-sm cursor-pointer"
+                  />
+                </label>
+
+                {/* 3. Phone Number Toggle */}
+                <label className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl cursor-pointer hover:border-indigo-300 transition-colors">
+                  <div className="flex items-center gap-2">
+                    <PhoneCall className="w-4 h-4 text-slate-500" />
+                    <div>
+                      <div className="text-xs font-black text-slate-800">إظهار رقم الهاتف</div>
+                      <div className="text-[10px] text-slate-400">زر الاتصال المباشر بالصيدلية</div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={pharmacyForm.showPhoneNumber}
+                    onChange={(e) => setPharmacyForm({ ...pharmacyForm, showPhoneNumber: e.target.checked })}
+                    className="w-4 h-4 text-indigo-600 rounded-sm cursor-pointer"
+                  />
+                </label>
+
+                {/* 4. WhatsApp Direct Toggle */}
+                <label className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl cursor-pointer hover:border-indigo-300 transition-colors">
+                  <div className="flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4 text-emerald-600" />
+                    <div>
+                      <div className="text-xs font-black text-slate-800">زر الواتساب المباشر</div>
+                      <div className="text-[10px] text-slate-400">محادثة فورية للاستفسار والحجز</div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={pharmacyForm.showWhatsapp}
+                    onChange={(e) => setPharmacyForm({ ...pharmacyForm, showWhatsapp: e.target.checked })}
+                    className="w-4 h-4 text-emerald-600 rounded-sm cursor-pointer"
+                  />
+                </label>
+
+                {/* 5. 24 Hours / Night Shift Toggle */}
+                <label className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl cursor-pointer hover:border-indigo-300 transition-colors md:col-span-2">
+                  <div className="flex items-center gap-2">
+                    <Moon className="w-4 h-4 text-amber-500" />
+                    <div>
+                      <div className="text-xs font-black text-slate-800">صيدلية خافرة / تعمل 24 ساعة</div>
+                      <div className="text-[10px] text-slate-400">شارة خفارة مميزة في نتائج البحث الليلي للمرضى</div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={pharmacyForm.is24Hours}
+                    onChange={(e) => setPharmacyForm({ ...pharmacyForm, is24Hours: e.target.checked })}
+                    className="w-4 h-4 text-amber-600 rounded-sm cursor-pointer"
+                  />
+                </label>
               </div>
             </div>
 
@@ -647,7 +737,7 @@ export const PharmacyProfileView: React.FC = () => {
               className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer transition-all active:scale-95"
             >
               <Save className="w-4 h-4" />
-              {saving ? 'جاري الحفظ...' : 'حفظ تعديلات الصيدلية والشعار'}
+              {saving ? 'جاري الحفظ...' : 'حفظ تعديلات الصيدلية والخصوصية'}
             </button>
           </form>
 

@@ -21,6 +21,10 @@ export class CartItemDto {
   @IsNotEmpty({ message: 'معرف المادة في المخزن مطلوب' })
   inventoryItemId: string;
 
+  @IsString()
+  @IsOptional()
+  inventoryBatchId?: string;
+
   @IsEnum(UnitTypeEnum, { message: 'نوع الوحدة يجب أن يكون PACK أو STRIP' })
   unitType: UnitTypeEnum;
 
@@ -65,4 +69,35 @@ export class CreateReturnDto {
   @IsString()
   @IsOptional()
   reason?: string;
+}
+
+export class OfflineSaleItemDto {
+  @IsString()
+  @IsNotEmpty()
+  offlineId: string;
+
+  @IsString()
+  @IsOptional()
+  offlineInvoiceNumber?: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CartItemDto)
+  items: CartItemDto[];
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  discountAmount?: number = 0;
+
+  @IsString()
+  @IsOptional()
+  createdAt?: string;
+}
+
+export class SyncOfflineSalesDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OfflineSaleItemDto)
+  sales: OfflineSaleItemDto[];
 }

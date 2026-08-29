@@ -27,8 +27,20 @@ export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Get()
-  async getPharmacyInventory(@Query() query: { search?: string }) {
+  async getPharmacyInventory(@Query() query: { search?: string; supplierId?: string }) {
     return this.inventoryService.getPharmacyInventory(query);
+  }
+
+  @Get('batches/trace/:batchNumber')
+  @Roles('OWNER')
+  async getBatchTraceability(@Param('batchNumber') batchNumber: string) {
+    return this.inventoryService.getBatchTraceability(batchNumber);
+  }
+
+  @Post('batches/recall')
+  @Roles('OWNER')
+  async setBatchRecall(@Body() body: { batchNumber: string; isRecalled: boolean }) {
+    return this.inventoryService.setBatchRecall(body.batchNumber, body.isRecalled);
   }
 
   @Get('summary')
@@ -106,5 +118,11 @@ export class InventoryController {
     @Body() dto: UpdateItemPriceDto,
   ) {
     return this.inventoryService.updateItemPrice(id, dto);
+  }
+
+  @Patch(':id/visibility')
+  @Roles('OWNER')
+  async toggleItemPublicVisibility(@Param('id') id: string) {
+    return this.inventoryService.toggleItemPublicVisibility(id);
   }
 }

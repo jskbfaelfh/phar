@@ -41,6 +41,11 @@ export class InventoryService {
     try {
       const ddl = `
         ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS custom_name VARCHAR(255);
+        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS supplier_id UUID;
+        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS purchase_id UUID;
+        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS is_recalled BOOLEAN DEFAULT FALSE;
+        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_pack DECIMAL(12, 2);
+        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_unit DECIMAL(12, 2);
         CREATE TABLE IF NOT EXISTS "${schemaName}".suppliers (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           name VARCHAR(255) NOT NULL,
@@ -92,9 +97,17 @@ export class InventoryService {
           created_at TIMESTAMP DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS "idx_${schemaName}_supp_pay_dt" ON "${schemaName}".supplier_payments (created_at);
+        ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS is_public_visible BOOLEAN DEFAULT TRUE;
       `;
 
-      await this.prisma.$executeRawUnsafe(ddl);
+      const statements = ddl
+        .split(';')
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      for (const sql of statements) {
+        await this.prisma.$executeRawUnsafe(sql);
+      }
       InventoryService.verifiedSchemas.add(schemaName);
     } catch (err: any) {
       this.logger.warn(`Could not verify purchase tables for ${schemaName}: ${err.message}`);
@@ -586,12 +599,16 @@ export class InventoryService {
 
       await this.prisma.$executeRawUnsafe(
         `INSERT INTO "${schemaName}".inventory_batches
-         (id, inventory_item_id, batch_number, purchase_price_pack, quantity_units_remaining, expiry_date, created_at)
-         VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::date, NOW())`,
+         (id, inventory_item_id, supplier_id, purchase_id, batch_number, purchase_price_pack, selling_price_pack, selling_price_unit, quantity_units_remaining, expiry_date, is_recalled, created_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10::date, FALSE, NOW())`,
         batchId,
         inventoryItemId,
+        finalSupplierId,
+        purchaseId,
         item.batchNumber || null,
         Math.round(effectiveNetCostPerPack),
+        item.sellingPricePack,
+        item.sellingPriceUnit,
         totalUnits,
         expiryDateStr,
       );
@@ -693,7 +710,7 @@ export class InventoryService {
   /**
    * Get all pharmacy inventory items with master info, custom alias name, and calculated stock
    */
-  async getPharmacyInventory(query?: { search?: string }) {
+  async getPharmacyInventory(query?: { search?: string; supplierId?: string }) {
     const schemaName = this.tenantContext.getSchemaName();
     await this.ensurePurchaseTablesExist(schemaName);
 
@@ -702,7 +719,12 @@ export class InventoryService {
 
     if (query?.search && query.search.trim().length > 0) {
       params.push(`%${query.search.trim()}%`);
-      searchFilter = `AND (m.trade_name ILIKE $1 OR m.scientific_name ILIKE $1 OR m.barcode ILIKE $1 OR i.custom_name ILIKE $1)`;
+      searchFilter += ` AND (m.trade_name ILIKE $${params.length} OR m.scientific_name ILIKE $${params.length} OR m.barcode ILIKE $${params.length} OR i.custom_name ILIKE $${params.length})`;
+    }
+
+    if (query?.supplierId && query.supplierId.trim().length > 0) {
+      params.push(query.supplierId.trim());
+      searchFilter += ` AND EXISTS (SELECT 1 FROM "${schemaName}".inventory_batches b_sub WHERE b_sub.inventory_item_id = i.id AND b_sub.supplier_id = $${params.length}::uuid AND b_sub.quantity_units_remaining > 0)`;
     }
 
     const sql = `
@@ -711,9 +733,32 @@ export class InventoryService {
         i.medicine_id as "medicineId",
         i.custom_name as "customName",
         i.units_per_pack as "unitsPerPack",
-        i.selling_price_pack as "sellingPricePack",
-        i.selling_price_unit as "sellingPriceUnit",
+        COALESCE(
+          (SELECT b_sub.selling_price_pack 
+           FROM "${schemaName}".inventory_batches b_sub 
+           WHERE b_sub.inventory_item_id = i.id 
+             AND b_sub.quantity_units_remaining > 0 
+             AND b_sub.expiry_date >= CURRENT_DATE 
+             AND (b_sub.is_recalled IS FALSE OR b_sub.is_recalled IS NULL)
+             AND b_sub.selling_price_pack IS NOT NULL
+           ORDER BY b_sub.expiry_date ASC, b_sub.created_at ASC 
+           LIMIT 1), 
+          i.selling_price_pack
+        ) as "sellingPricePack",
+        COALESCE(
+          (SELECT b_sub.selling_price_unit 
+           FROM "${schemaName}".inventory_batches b_sub 
+           WHERE b_sub.inventory_item_id = i.id 
+             AND b_sub.quantity_units_remaining > 0 
+             AND b_sub.expiry_date >= CURRENT_DATE 
+             AND (b_sub.is_recalled IS FALSE OR b_sub.is_recalled IS NULL)
+             AND b_sub.selling_price_unit IS NOT NULL
+           ORDER BY b_sub.expiry_date ASC, b_sub.created_at ASC 
+           LIMIT 1), 
+          i.selling_price_unit
+        ) as "sellingPriceUnit",
         i.min_alert_units as "minAlertUnits",
+        COALESCE(i.is_public_visible, TRUE) as "isPublicVisible",
         i.updated_at as "updatedAt",
         m.trade_name as "tradeName",
         m.scientific_name as "scientificName",
@@ -723,7 +768,27 @@ export class InventoryService {
         m.barcode as "barcode",
         COALESCE(SUM(b.quantity_units_remaining), 0)::int as "totalUnitsRemaining",
         FLOOR(COALESCE(SUM(b.quantity_units_remaining), 0) / i.units_per_pack)::int as "availablePacks",
-        (COALESCE(SUM(b.quantity_units_remaining), 0) % i.units_per_pack)::int as "availableStrips"
+        (COALESCE(SUM(b.quantity_units_remaining), 0) % i.units_per_pack)::int as "availableStrips",
+        (
+          SELECT json_agg(
+            json_build_object(
+              'id', b_agg.id,
+              'batchNumber', b_agg.batch_number,
+              'expiryFormatted', TO_CHAR(b_agg.expiry_date, 'MM/YYYY'),
+              'sellingPricePack', COALESCE(b_agg.selling_price_pack, i.selling_price_pack),
+              'sellingPriceUnit', COALESCE(b_agg.selling_price_unit, i.selling_price_unit),
+              'purchasePricePack', b_agg.purchase_price_pack,
+              'quantityUnitsRemaining', b_agg.quantity_units_remaining,
+              'availablePacks', FLOOR(b_agg.quantity_units_remaining / i.units_per_pack),
+              'availableStrips', (b_agg.quantity_units_remaining % i.units_per_pack)
+            ) ORDER BY b_agg.expiry_date ASC, b_agg.created_at ASC
+          )
+          FROM "${schemaName}".inventory_batches b_agg
+          WHERE b_agg.inventory_item_id = i.id 
+            AND b_agg.quantity_units_remaining > 0
+            AND b_agg.expiry_date >= CURRENT_DATE
+            AND (b_agg.is_recalled IS FALSE OR b_agg.is_recalled IS NULL)
+        ) as "activeBatches"
       FROM "${schemaName}".inventory_items i
       JOIN public.medicines m ON i.medicine_id = m.id
       LEFT JOIN "${schemaName}".inventory_batches b ON i.id = b.inventory_item_id AND b.quantity_units_remaining > 0
@@ -747,17 +812,121 @@ export class InventoryService {
         b.id,
         b.batch_number as "batchNumber",
         b.purchase_price_pack as "purchasePricePack",
+        b.selling_price_pack as "sellingPricePack",
+        b.selling_price_unit as "sellingPriceUnit",
         b.quantity_units_remaining as "quantityUnitsRemaining",
         TO_CHAR(b.expiry_date, 'MM/YYYY') as "expiryFormatted",
         b.expiry_date as "expiryDate",
+        b.is_recalled as "isRecalled",
+        b.supplier_id as "supplierId",
+        b.purchase_id as "purchaseId",
+        s.name as "supplierName",
         b.created_at as "createdAt"
       FROM "${schemaName}".inventory_batches b
+      LEFT JOIN "${schemaName}".suppliers s ON b.supplier_id = s.id
       WHERE b.inventory_item_id = $1::uuid AND b.quantity_units_remaining > 0
       ORDER BY b.expiry_date ASC;
     `;
 
     const batches: any[] = await this.prisma.$queryRawUnsafe(sql, inventoryItemId);
     return batches;
+  }
+
+  /**
+   * Search and trace a batch across stock and sales invoices
+   */
+  async getBatchTraceability(batchNumber: string) {
+    const schemaName = this.tenantContext.getSchemaName();
+    await this.ensurePurchaseTablesExist(schemaName);
+
+    const cleanBatch = batchNumber.trim();
+
+    // 1. Get Batch Details with Medicine and Supplier info
+    const batchesSql = `
+      SELECT 
+        b.id as "batchId",
+        b.batch_number as "batchNumber",
+        b.purchase_price_pack as "purchasePricePack",
+        b.selling_price_pack as "sellingPricePack",
+        b.selling_price_unit as "sellingPriceUnit",
+        b.quantity_units_remaining as "quantityUnitsRemaining",
+        b.expiry_date as "expiryDate",
+        b.is_recalled as "isRecalled",
+        b.created_at as "receivedAt",
+        m.trade_name as "tradeName",
+        m.scientific_name as "scientificName",
+        m.dosage_form as "dosageForm",
+        m.strength as "strength",
+        i.units_per_pack as "unitsPerPack",
+        s.name as "supplierName",
+        s.phone as "supplierPhone",
+        p.invoice_number as "purchaseInvoiceNumber"
+      FROM "${schemaName}".inventory_batches b
+      JOIN "${schemaName}".inventory_items i ON b.inventory_item_id = i.id
+      JOIN public.medicines m ON i.medicine_id = m.id
+      LEFT JOIN "${schemaName}".suppliers s ON b.supplier_id = s.id
+      LEFT JOIN "${schemaName}".purchases p ON b.purchase_id = p.id
+      WHERE b.batch_number ILIKE $1;
+    `;
+
+    const batches: any[] = await this.prisma.$queryRawUnsafe(batchesSql, `%${cleanBatch}%`);
+
+    if (batches.length === 0) {
+      return { found: false, message: 'لم يتم العثور على أي تشغيلة مطابقة للرقم المدخل' };
+    }
+
+    const batchIds = batches.map((b) => b.batchId);
+
+    // 2. Get Sales Invoices that dispensed from this batch
+    const salesSql = `
+      SELECT 
+        si.id as "saleItemId",
+        si.quantity as "quantitySold",
+        si.unit_type as "unitType",
+        si.unit_price as "unitPrice",
+        si.total_price as "totalPrice",
+        s.id as "saleId",
+        s.invoice_number as "invoiceNumber",
+        s.created_at as "soldAt",
+        u.name as "cashierName"
+      FROM "${schemaName}".sale_items si
+      JOIN "${schemaName}".sales s ON si.sale_id = s.id
+      LEFT JOIN "${schemaName}".users u ON s.user_id = u.id
+      WHERE si.inventory_batch_id = ANY($1::uuid[])
+      ORDER BY s.created_at DESC;
+    `;
+
+    const salesHistory: any[] = await this.prisma.$queryRawUnsafe(salesSql, batchIds);
+
+    return {
+      found: true,
+      batches,
+      salesHistory,
+    };
+  }
+
+  /**
+   * Set Recall (Block / Unblock) for a batch number
+   */
+  async setBatchRecall(batchNumber: string, isRecalled: boolean) {
+    const schemaName = this.tenantContext.getSchemaName();
+    await this.ensurePurchaseTablesExist(schemaName);
+
+    const res = await this.prisma.$executeRawUnsafe(
+      `UPDATE "${schemaName}".inventory_batches
+       SET is_recalled = $1
+       WHERE batch_number = $2`,
+      isRecalled,
+      batchNumber.trim(),
+    );
+
+    return {
+      success: true,
+      updatedCount: res,
+      message: isRecalled
+        ? `تم قفل وسحب التشغيلة (${batchNumber}) بنجاح، ولن يتمكن الكاشير من بيعها.`
+        : `تم إلغاء قفل التشغيلة (${batchNumber}) وإعادتها للبيع بنجاح.`,
+    };
   }
 
   /**
@@ -801,6 +970,52 @@ export class InventoryService {
     });
 
     return { success: true, message: 'تم تحديث بيانات وسعر المادة بنجاح' };
+  }
+
+  /**
+   * Toggle item visibility in public network search
+   */
+  async toggleItemPublicVisibility(inventoryItemId: string) {
+    const tenantId = this.tenantContext.getTenantId();
+    const schemaName = this.tenantContext.getSchemaName();
+
+    const rows: any[] = await this.prisma.$queryRawUnsafe(
+      `SELECT id, medicine_id as "medicineId", is_public_visible as "isPublicVisible" FROM "${schemaName}".inventory_items WHERE id = $1::uuid LIMIT 1`,
+      inventoryItemId,
+    );
+
+    if (rows.length === 0) {
+      throw new NotFoundException('المادة غير موجودة');
+    }
+
+    const currentVisible = rows[0].isPublicVisible !== false;
+    const newVisible = !currentVisible;
+
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE "${schemaName}".inventory_items SET is_public_visible = $1, updated_at = NOW() WHERE id = $2::uuid`,
+      newVisible,
+      inventoryItemId,
+    );
+
+    // Sync central search index
+    if (!newVisible) {
+      await this.prisma.centralSearchIndex.updateMany({
+        where: { tenantId, medicineId: rows[0].medicineId },
+        data: { isAvailable: false },
+      });
+    } else {
+      this.eventEmitter.emit('inventory.synced', {
+        tenantId,
+        schemaName,
+        medicineIds: [rows[0].medicineId],
+      });
+    }
+
+    return {
+      success: true,
+      isPublicVisible: newVisible,
+      message: newVisible ? 'تم إظهار الدواء في البحث الشبكي العام 🌐' : 'تم إخفاء الدواء من البحث الشبكي العام 🔒',
+    };
   }
 
   /**

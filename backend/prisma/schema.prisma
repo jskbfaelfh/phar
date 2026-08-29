@@ -44,6 +44,11 @@ model Tenant {
   r2AccountId        String?            @map("r2_account_id") @db.VarChar(255)
   r2AccessKeyId      String?            @map("r2_access_key_id") @db.VarChar(255)
   r2SecretAccessKey  String?            @map("r2_secret_access_key") @db.Text
+  isSearchVisible    Boolean            @default(true) @map("is_search_visible")
+  showSellingPrices  Boolean            @default(true) @map("show_selling_prices")
+  showPhoneNumber    Boolean            @default(true) @map("show_phone_number")
+  showWhatsapp       Boolean            @default(true) @map("show_whatsapp")
+  is24Hours          Boolean            @default(false) @map("is_24_hours")
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
 
@@ -73,22 +78,29 @@ model Medicine {
 }
 
 model CentralSearchIndex {
-  id               String   @id @default(uuid()) @db.Uuid
-  tenantId         String   @map("tenant_id") @db.Uuid
-  medicineId       String   @map("medicine_id") @db.Uuid
-  pharmacyName     String   @map("pharmacy_name") @db.VarChar(255)
-  governorate      String   @db.VarChar(100)
-  district         String   @db.VarChar(100)
-  addressDetails   String?  @map("address_details") @db.Text
-  googleMapsUrl    String?  @map("google_maps_url") @db.Text
-  latitude         Decimal? @db.Decimal(10, 8)
-  longitude        Decimal? @db.Decimal(11, 8)
-  phone            String   @db.VarChar(50)
-  tradeName        String   @map("trade_name") @db.VarChar(255)
-  scientificName   String   @map("scientific_name") @db.VarChar(255)
-  sellingPricePack Decimal  @map("selling_price_pack") @db.Decimal(12, 2)
-  isAvailable      Boolean  @default(true) @map("is_available")
-  lastSyncedAt     DateTime @default(now()) @map("last_synced_at")
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  medicineId        String   @map("medicine_id") @db.Uuid
+  pharmacyName      String   @map("pharmacy_name") @db.VarChar(255)
+  governorate       String   @db.VarChar(100)
+  district          String   @db.VarChar(100)
+  addressDetails    String?  @map("address_details") @db.Text
+  googleMapsUrl     String?  @map("google_maps_url") @db.Text
+  latitude          Decimal? @db.Decimal(10, 8)
+  longitude         Decimal? @db.Decimal(11, 8)
+  phone             String   @db.VarChar(50)
+  tradeName         String   @map("trade_name") @db.VarChar(255)
+  scientificName    String   @map("scientific_name") @db.VarChar(255)
+  dosageForm        String?  @map("dosage_form") @db.VarChar(100)
+  strength          String?  @db.VarChar(100)
+  sellingPricePack  Decimal  @map("selling_price_pack") @db.Decimal(12, 2)
+  stockStatus       String   @default("HIGH_STOCK") @map("stock_status") @db.VarChar(50)
+  showSellingPrices Boolean  @default(true) @map("show_selling_prices")
+  showPhoneNumber   Boolean  @default(true) @map("show_phone_number")
+  showWhatsapp      Boolean  @default(true) @map("show_whatsapp")
+  is24Hours         Boolean  @default(false) @map("is_24_hours")
+  isAvailable       Boolean  @default(true) @map("is_available")
+  lastSyncedAt      DateTime @default(now()) @map("last_synced_at")
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   medicine Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
@@ -146,6 +158,7 @@ model InventoryItem {
   sellingPricePack Decimal  @map("selling_price_pack") @db.Decimal(12, 2)
   sellingPriceUnit Decimal  @map("selling_price_unit") @db.Decimal(12, 2)
   minAlertUnits    Int      @default(5) @map("min_alert_units")
+  isPublicVisible  Boolean  @default(true) @map("is_public_visible")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 

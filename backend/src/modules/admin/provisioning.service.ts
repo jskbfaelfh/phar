@@ -150,10 +150,15 @@ export class ProvisioningService {
       `CREATE TABLE IF NOT EXISTS "${schemaName}".inventory_batches (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         inventory_item_id UUID REFERENCES "${schemaName}".inventory_items(id) ON DELETE CASCADE,
+        supplier_id UUID,
+        purchase_id UUID,
         batch_number VARCHAR(100),
         purchase_price_pack DECIMAL(12, 2) NOT NULL,
+        selling_price_pack DECIMAL(12, 2),
+        selling_price_unit DECIMAL(12, 2),
         quantity_units_remaining INT NOT NULL,
         expiry_date DATE NOT NULL,
+        is_recalled BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT NOW()
       )`,
       `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_batch_exp" ON "${schemaName}".inventory_batches (expiry_date)`,

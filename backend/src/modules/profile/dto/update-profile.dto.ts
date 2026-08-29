@@ -41,6 +41,21 @@ export class UpdatePharmacyProfileDto {
   @IsOptional()
   @IsString()
   receiptFooter?: string;
+
+  @IsOptional()
+  isSearchVisible?: boolean;
+
+  @IsOptional()
+  showSellingPrices?: boolean;
+
+  @IsOptional()
+  showPhoneNumber?: boolean;
+
+  @IsOptional()
+  showWhatsapp?: boolean;
+
+  @IsOptional()
+  is24Hours?: boolean;
 }
 
 export class ChangeOwnerPasswordDto {

@@ -1,4 +1,5 @@
-import { IsOptional, IsString, IsInt, Min } from 'class-validator';
+import { IsOptional, IsString, IsNumber } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class PublicSearchQueryDto {
   @IsString()
@@ -13,8 +14,19 @@ export class PublicSearchQueryDto {
   @IsOptional()
   district?: string;
 
-  @IsInt()
-  @Min(1)
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  userLat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  userLng?: number;
+
+  @IsOptional()
+  only24Hours?: boolean | string;
+
   @IsOptional()
   limit?: number = 50;
 }

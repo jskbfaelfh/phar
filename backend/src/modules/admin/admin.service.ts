@@ -89,7 +89,7 @@ export class AdminService {
     try {
       // 1. Check if the schema and users table exist
       const checkTable: any[] = await this.prisma.$queryRawUnsafe(`
-        SELECT to_regclass('"${tenant.schemaName}".users') as table_exists;
+        SELECT to_regclass('"${tenant.schemaName}".users')::text as table_exists;
       `);
 
       if (!checkTable[0] || !checkTable[0].table_exists) {
@@ -145,7 +145,7 @@ export class AdminService {
 
     // Ensure table exists
     const checkTable: any[] = await this.prisma.$queryRawUnsafe(`
-      SELECT to_regclass('"${tenant.schemaName}".users') as table_exists;
+      SELECT to_regclass('"${tenant.schemaName}".users')::text as table_exists;
     `);
 
     if (!checkTable[0] || !checkTable[0].table_exists) {

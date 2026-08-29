@@ -77,6 +77,11 @@ export class ProfileService {
         logoUrl: tenant.logoUrl || null,
         receiptHeader: tenant.receiptHeader || `أهلاً بكم في ${tenant.name}`,
         receiptFooter: tenant.receiptFooter || 'نتمنى لكم الشفاء العاجل • الأدوية المباعة لا ترد ولا تستبدل بعد 3 أيام',
+        isSearchVisible: (tenant as any).isSearchVisible ?? true,
+        showSellingPrices: (tenant as any).showSellingPrices ?? true,
+        showPhoneNumber: (tenant as any).showPhoneNumber ?? true,
+        showWhatsapp: (tenant as any).showWhatsapp ?? true,
+        is24Hours: (tenant as any).is24Hours ?? false,
         licenseKey: tenant.licenseKey,
         subscriptionStatus: tenant.subscriptionStatus,
         subscriptionEndsAt: tenant.subscriptionEndsAt,
@@ -103,6 +108,11 @@ export class ProfileService {
     if (dto.logoUrl !== undefined) updateData.logoUrl = dto.logoUrl;
     if (dto.receiptHeader !== undefined) updateData.receiptHeader = dto.receiptHeader;
     if (dto.receiptFooter !== undefined) updateData.receiptFooter = dto.receiptFooter;
+    if (dto.isSearchVisible !== undefined) updateData.isSearchVisible = dto.isSearchVisible;
+    if (dto.showSellingPrices !== undefined) updateData.showSellingPrices = dto.showSellingPrices;
+    if (dto.showPhoneNumber !== undefined) updateData.showPhoneNumber = dto.showPhoneNumber;
+    if (dto.showWhatsapp !== undefined) updateData.showWhatsapp = dto.showWhatsapp;
+    if (dto.is24Hours !== undefined) updateData.is24Hours = dto.is24Hours;
 
     const updated = await this.prisma.tenant.update({
       where: { id: tenantId },
@@ -119,6 +129,10 @@ export class ProfileService {
         addressDetails: updated.addressDetails,
         googleMapsUrl: updated.googleMapsUrl,
         phone: updated.phone,
+        showSellingPrices: (updated as any).showSellingPrices ?? true,
+        showPhoneNumber: (updated as any).showPhoneNumber ?? true,
+        showWhatsapp: (updated as any).showWhatsapp ?? true,
+        is24Hours: (updated as any).is24Hours ?? false,
       },
     });
 
@@ -126,7 +140,7 @@ export class ProfileService {
 
     return {
       success: true,
-      message: 'تم تحديث بيانات وشعار الصيدلية بنجاح',
+      message: 'تم تحديث بيانات وإعدادات خصوصية الصيدلية بنجاح',
       pharmacy: updated,
     };
   }

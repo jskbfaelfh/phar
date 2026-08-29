@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { PosService } from './pos.service';
-import { CheckoutDto, CreateReturnDto } from './dto/create-sale.dto';
+import { CheckoutDto, CreateReturnDto, SyncOfflineSalesDto } from './dto/create-sale.dto';
 import { SubscriptionGuard } from '../../common/guards/subscription.guard';
 
 @Controller('pos')
@@ -20,6 +20,11 @@ export class PosController {
   @Post('checkout')
   async checkout(@Body() dto: CheckoutDto) {
     return this.posService.checkout(dto);
+  }
+
+  @Post('sync-offline')
+  async syncOffline(@Body() dto: SyncOfflineSalesDto) {
+    return this.posService.syncOfflineSales(dto);
   }
 
   @Post('return')

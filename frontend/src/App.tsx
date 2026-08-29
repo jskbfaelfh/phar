@@ -77,41 +77,24 @@ export const App: React.FC = () => {
   };
 
   // If viewing public search screen
+  // If viewing public search screen (Pure Public Portal)
   if (activeTab === 'PUBLIC_SEARCH') {
     return (
-      <div className="min-h-screen bg-slate-50 flex flex-col">
-        {/* Public Navigation */}
-        <header className="bg-slate-900 text-white px-6 py-3.5 flex items-center justify-between border-b border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-emerald-500 text-white rounded-xl flex items-center justify-center font-black">
-              <Pill className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="font-black text-lg tracking-tight text-white">دوائي</span>
-              <span className="text-[10px] text-emerald-400 font-bold mr-1.5 px-1.5 py-0.5 bg-emerald-950/60 rounded">
-                شبكة البحث
-              </span>
-            </div>
+      <div className="min-h-screen bg-slate-950 flex flex-col">
+        {currentUser && (
+          <div className="bg-slate-900 border-b border-slate-800 px-6 py-2.5 flex items-center justify-between text-xs z-50">
+            <span className="text-slate-400 font-bold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              معاينة شبكة البحث العامة للمواطنين (حساب الصيدلية نشط)
+            </span>
+            <button
+              onClick={() => setActiveTab(currentUser.role === 'SUPER_ADMIN' ? 'ADMIN' : 'POS')}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs transition-all shadow-xs cursor-pointer"
+            >
+              العودة لإدارة الصيدلية
+            </button>
           </div>
-
-          <div className="flex items-center gap-3">
-            {currentUser ? (
-              <button
-                onClick={() => setActiveTab(currentUser.role === 'SUPER_ADMIN' ? 'ADMIN' : 'POS')}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
-              >
-                العودة للوحة التحكم
-              </button>
-            ) : (
-              <button
-                onClick={() => setActiveTab('LOGIN')}
-                className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
-              >
-                دخول الصيدليات / الإدارة
-              </button>
-            )}
-          </div>
-        </header>
+        )}
 
         <PublicSearchView />
       </div>
