@@ -13,6 +13,8 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { BackupModule } from './modules/backup/backup.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
+import { PurchasesModule } from './modules/purchases/purchases.module';
+import { ExpensesModule } from './modules/expenses/expenses.module';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -28,6 +30,8 @@ import { AppService } from './app.service';
     AdminModule,
     MedicinesModule,
     InventoryModule,
+    PurchasesModule,
+    ExpensesModule,
     SearchModule,
     PosModule,
     ReportsModule,

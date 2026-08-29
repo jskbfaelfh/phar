@@ -542,4 +542,82 @@ export class PosService {
     const sales: any[] = await this.prisma.$queryRawUnsafe(sql, ...params);
     return sales;
   }
+
+  /**
+   * Close Shift Handover with cash reconciliation
+   */
+  async closeShiftHandover(user: any, dto: { actualCash: number; openingCash?: number; notes?: string }) {
+    const schemaName = this.tenantContext.getSchemaName();
+
+    // Calculate today's sales and returns for expected cash
+    const summary = await this.getDailySummary();
+    const openingCash = Number(dto.openingCash || 0);
+    const expectedCash = openingCash + summary.netCashInDrawer;
+    const actualCash = Number(dto.actualCash || 0);
+    const cashDifference = actualCash - expectedCash;
+
+    const result: any[] = await this.prisma.$queryRawUnsafe(`
+      INSERT INTO "${schemaName}".shift_logs (
+        user_id, user_name, opening_cash, expected_cash, actual_cash, cash_difference,
+        total_sales_count, total_sales_amount, notes, status, closed_at
+      ) VALUES (
+        $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, 'CLOSED', CURRENT_TIMESTAMP
+      ) RETURNING id, opened_at as "openedAt", closed_at as "closedAt";
+    `,
+      user.id,
+      user.name || 'الكاشير',
+      openingCash,
+      expectedCash,
+      actualCash,
+      cashDifference,
+      summary.totalInvoices,
+      summary.totalSalesRevenue,
+      dto.notes || null
+    );
+
+    return {
+      message: 'تم إغلاق الوردية وتوثيق المطابقة النقدية بنجاح',
+      shiftId: result[0]?.id,
+      openedAt: result[0]?.openedAt,
+      closedAt: result[0]?.closedAt,
+      openingCash,
+      expectedCash,
+      actualCash,
+      cashDifference,
+      totalSalesCount: summary.totalInvoices,
+      totalSalesAmount: summary.totalSalesRevenue,
+      netCashInDrawer: summary.netCashInDrawer,
+    };
+  }
+
+  /**
+   * Get shift history logs
+   */
+  async getShiftHistory(limit: number = 30) {
+    const schemaName = this.tenantContext.getSchemaName();
+    const sql = `
+      SELECT 
+        id,
+        user_id as "userId",
+        user_name as "userName",
+        opened_at as "openedAt",
+        closed_at as "closedAt",
+        opening_cash as "openingCash",
+        expected_cash as "expectedCash",
+        actual_cash as "actualCash",
+        cash_difference as "cashDifference",
+        total_sales_count as "totalSalesCount",
+        total_sales_amount as "totalSalesAmount",
+        notes,
+        status
+      FROM "${schemaName}".shift_logs
+      ORDER BY closed_at DESC, opened_at DESC
+      LIMIT $1;
+    `;
+    try {
+      return await this.prisma.$queryRawUnsafe(sql, limit);
+    } catch {
+      return [];
+    }
+  }
 }

@@ -17,10 +17,12 @@ import {
   Ban,
   FileText,
   Globe,
+  Barcode,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { calculateStripPrice } from '../utils/currency';
 import { usePharmacyLiveSync } from '../hooks/usePharmacyLiveSync';
+import { BarcodeGeneratorModal } from '../components/BarcodeGeneratorModal';
 import {
   getLocalInventory,
   saveLocalInventoryBulk,
@@ -63,6 +65,9 @@ export const InventoryView: React.FC = () => {
   const [batchesItem, setBatchesItem] = useState<any | null>(null);
   const [batchesList, setBatchesList] = useState<any[]>([]);
   const [loadingBatches, setLoadingBatches] = useState(false);
+
+  // Barcode generator modal state
+  const [barcodeItem, setBarcodeItem] = useState<any | null>(null);
 
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -566,6 +571,14 @@ export const InventoryView: React.FC = () => {
                             الوجبات
                           </button>
                           <button
+                            onClick={() => setBarcodeItem(item)}
+                            className="px-2 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-md font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors"
+                            title="توليد وطباعة ملصق الباركود الحراري"
+                          >
+                            <Barcode className="w-3.5 h-3.5 text-purple-600" />
+                            باركود
+                          </button>
+                          <button
                             onClick={() => openEditModal(item)}
                             className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-md font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors"
                             title="تعديل سعر البيع والاسم المخصص وحد التنبيه"
@@ -912,6 +925,14 @@ export const InventoryView: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Barcode Label Generator Modal */}
+      {barcodeItem && (
+        <BarcodeGeneratorModal
+          item={barcodeItem}
+          onClose={() => setBarcodeItem(null)}
+        />
       )}
     </div>
   );

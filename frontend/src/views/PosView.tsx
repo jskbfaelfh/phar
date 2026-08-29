@@ -17,6 +17,7 @@ import {
   Zap,
   Maximize2,
   Minimize2,
+  Lock,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250 } from '../utils/currency';
@@ -178,7 +179,36 @@ export const PosView: React.FC = () => {
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [showShiftSummary, setShowShiftSummary] = useState(false);
   const [shiftSummary, setShiftSummary] = useState<any | null>(null);
+  const [showShiftCloseModal, setShowShiftCloseModal] = useState(false);
+  const [actualCashInput, setActualCashInput] = useState<number | ''>('');
+  const [openingCashInput, setOpeningCashInput] = useState<number | ''>('');
+  const [shiftCloseNotes, setShiftCloseNotes] = useState('');
+  const [closingShift, setClosingShift] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const handleCloseShift = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setClosingShift(true);
+    try {
+      const res = await apiRequest<any>('/pos/shifts/close', {
+        method: 'POST',
+        body: JSON.stringify({
+          actualCash: Number(actualCashInput) || 0,
+          openingCash: Number(openingCashInput) || 0,
+          notes: shiftCloseNotes.trim() || undefined,
+        }),
+      });
+      setMessage({ type: 'success', text: res.message || 'تم إغلاق الوردية بنجاح' });
+      setShowShiftCloseModal(false);
+      setActualCashInput('');
+      setOpeningCashInput('');
+      setShiftCloseNotes('');
+    } catch (err: any) {
+      alert(err.message || 'فشل إغلاق الوردية');
+    } finally {
+      setClosingShift(false);
+    }
+  };
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -672,6 +702,18 @@ export const PosView: React.FC = () => {
           >
             <DollarSign className="w-3.5 h-3.5" />
             اليومية
+          </button>
+
+          <button
+            onClick={async () => {
+              await fetchShiftSummary();
+              setShowShiftCloseModal(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg border border-rose-200 transition-colors cursor-pointer"
+            title="إغلاق وردية الكاشير ومطابقة نقد الدرج"
+          >
+            <Lock className="w-3.5 h-3.5" />
+            <span>إغلاق الوردية</span>
           </button>
         </div>
       </div>
@@ -1226,6 +1268,147 @@ export const PosView: React.FC = () => {
           <div className="text-center mt-5 text-[10px] text-gray-600">
             <p>شكراً لزيارتكم</p>
             <p>تم تطوير النظام بواسطة Antigravity</p>
+          </div>
+        </div>
+      )}
+
+      {/* Shift Closing & Cash Handover Modal */}
+      {showShiftCloseModal && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 space-y-4 max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-rose-50 text-rose-700 flex items-center justify-center font-black">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-slate-900">إغلاق الوردية ومطابقة نقد الدرج</h3>
+                  <p className="text-xs text-slate-400">تسليم الكاش بين الورديات وتوثيق العجز أو الزيادة</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowShiftCloseModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCloseShift} className="flex-1 overflow-y-auto space-y-4 pr-1 text-xs">
+              {/* Shift Stats Summary */}
+              <div className="grid grid-cols-2 gap-2 p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
+                <div>
+                  <span className="text-slate-500">مبيعات الوردية:</span>
+                  <div className="font-black text-slate-900 font-mono text-sm">
+                    {Number(shiftSummary?.totalSalesRevenue || 0).toLocaleString()} د.ع
+                  </div>
+                </div>
+                <div>
+                  <span className="text-slate-500">الإرجاعات:</span>
+                  <div className="font-bold text-rose-600 font-mono">
+                    {Number(shiftSummary?.totalRefunds || 0).toLocaleString()} د.ع
+                  </div>
+                </div>
+                <div className="col-span-2 pt-2 border-t border-slate-200 flex justify-between items-center">
+                  <span className="font-bold text-slate-700">صافي الكاش المتولد من المبيعات:</span>
+                  <span className="font-black text-emerald-700 font-mono text-base">
+                    {Number(shiftSummary?.netCashInDrawer || 0).toLocaleString()} د.ع
+                  </span>
+                </div>
+              </div>
+
+              {/* Cash Reconciliation Inputs */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    الكاش الافتتاحي في الدرج (الفكة / رصيد بداية الوردية)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="250"
+                    value={openingCashInput}
+                    onChange={(e) => setOpeningCashInput(e.target.value === '' ? '' : Number(e.target.value))}
+                    placeholder="مثال: 50000 (اختياري)"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono font-bold text-slate-800 focus:outline-hidden focus:border-rose-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    الكاش الفعلي الموجود في الدرج الآن (بعد الجرد اليدوي) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    step="250"
+                    value={actualCashInput}
+                    onChange={(e) => setActualCashInput(e.target.value === '' ? '' : Number(e.target.value))}
+                    placeholder="أدخل المبلغ الفعلي بعد عد النقود"
+                    className="w-full p-3 bg-rose-50/50 border-2 border-rose-300 rounded-xl font-mono font-black text-lg text-slate-900 focus:outline-hidden focus:border-rose-600"
+                  />
+                </div>
+
+                {/* Live Difference Badge */}
+                {actualCashInput !== '' && (
+                  <div
+                    className={`p-3 rounded-xl border flex items-center justify-between font-bold ${
+                      Number(actualCashInput) === (Number(openingCashInput || 0) + Number(shiftSummary?.netCashInDrawer || 0))
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : Number(actualCashInput) > (Number(openingCashInput || 0) + Number(shiftSummary?.netCashInDrawer || 0))
+                        ? 'bg-blue-50 text-blue-800 border-blue-200'
+                        : 'bg-rose-50 text-rose-800 border-rose-200'
+                    }`}
+                  >
+                    <span>نتيجة المطابقة:</span>
+                    <span className="font-mono text-sm">
+                      {Number(actualCashInput) === (Number(openingCashInput || 0) + Number(shiftSummary?.netCashInDrawer || 0))
+                        ? '✅ مطابق تماماً (0 د.ع)'
+                        : Number(actualCashInput) > (Number(openingCashInput || 0) + Number(shiftSummary?.netCashInDrawer || 0))
+                        ? `🔺 زيادة نقدية: +${(
+                            Number(actualCashInput) -
+                            (Number(openingCashInput || 0) + Number(shiftSummary?.netCashInDrawer || 0))
+                          ).toLocaleString()} د.ع`
+                        : `🔻 عجز نقدي: ${(
+                            Number(actualCashInput) -
+                            (Number(openingCashInput || 0) + Number(shiftSummary?.netCashInDrawer || 0))
+                          ).toLocaleString()} د.ع`}
+                    </span>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">ملاحظات تسليم الوردية</label>
+                  <textarea
+                    rows={2}
+                    value={shiftCloseNotes}
+                    onChange={(e) => setShiftCloseNotes(e.target.value)}
+                    placeholder="أي ملاحظات حول الكاشير المستلم، الفكة، النواقص..."
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-hidden focus:border-rose-500 resize-none"
+                  />
+                </div>
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowShiftCloseModal(false)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={closingShift || actualCashInput === ''}
+                  className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white rounded-xl font-black shadow-xs active:scale-95 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  {closingShift ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                  <span>تأكيد إغلاق الوردية وتوثيق المطابقة</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

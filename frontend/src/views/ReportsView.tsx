@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   TrendingUp,
+  TrendingDown,
   DollarSign,
   PieChart,
   ShoppingBag,
@@ -12,6 +13,8 @@ import {
   Search,
   Users,
   CreditCard,
+  AlertTriangle,
+  Layers,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 
@@ -21,13 +24,14 @@ export const ReportsView: React.FC = () => {
     .toISOString()
     .slice(0, 10);
 
-  // Active Tab: 'inventory' | 'sold' | 'debts' | 'financial'
-  const [activeTab, setActiveTab] = useState<'inventory' | 'sold' | 'debts' | 'financial'>('inventory');
+  // Active Tab: 'inventory' | 'sold' | 'debts' | 'financial' | 'net_profit' | 'dead_stock'
+  const [activeTab, setActiveTab] = useState<'inventory' | 'sold' | 'debts' | 'financial' | 'net_profit' | 'dead_stock'>('inventory');
 
   // Date Range States
   const [periodPreset, setPeriodPreset] = useState<'today' | 'week' | 'month' | 'year' | 'custom'>('month');
   const [from, setFrom] = useState(firstDayOfMonth);
   const [to, setTo] = useState(today);
+  const [deadStockDays, setDeadStockDays] = useState<number>(60);
 
   // Search filter inside tables
   const [tableSearch, setTableSearch] = useState('');
@@ -37,6 +41,8 @@ export const ReportsView: React.FC = () => {
 
   // Data States
   const [financialData, setFinancialData] = useState<any | null>(null);
+  const [netProfitReport, setNetProfitReport] = useState<any | null>(null);
+  const [deadStockReport, setDeadStockReport] = useState<any | null>(null);
   const [topMedicines, setTopMedicines] = useState<any[]>([]);
   const [inventoryValuation, setInventoryValuation] = useState<any | null>(null);
   const [currentStocktake, setCurrentStocktake] = useState<any[]>([]);
@@ -89,6 +95,12 @@ export const ReportsView: React.FC = () => {
         setFinancialData(fin);
         setTopMedicines(top || []);
         setInventoryValuation(val);
+      } else if (activeTab === 'net_profit') {
+        const profit = await apiRequest<any>(`/reports/net-profit?from=${from}&to=${to}`);
+        setNetProfitReport(profit);
+      } else if (activeTab === 'dead_stock') {
+        const dead = await apiRequest<any>(`/reports/dead-stock?days=${deadStockDays}`);
+        setDeadStockReport(dead);
       }
     } catch (err) {
       console.error(err);
@@ -99,7 +111,7 @@ export const ReportsView: React.FC = () => {
 
   useEffect(() => {
     fetchReports();
-  }, [activeTab, from, to]);
+  }, [activeTab, from, to, deadStockDays]);
 
   // Export CSV Helper
   const exportToCSV = (filename: string, rows: (string | number)[][], headers: string[]) => {
@@ -186,7 +198,31 @@ export const ReportsView: React.FC = () => {
             }`}
           >
             <TrendingUp className="w-4 h-4 text-purple-600" />
-            كشف الأرباح
+            مجمل الأرباح
+          </button>
+
+          <button
+            onClick={() => setActiveTab('net_profit')}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'net_profit'
+                ? 'bg-white text-indigo-950 shadow-xs'
+                : 'text-slate-500 hover:text-slate-900'
+            }`}
+          >
+            <DollarSign className="w-4 h-4 text-emerald-600" />
+            صافي الأرباح (P&L)
+          </button>
+
+          <button
+            onClick={() => setActiveTab('dead_stock')}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'dead_stock'
+                ? 'bg-white text-indigo-950 shadow-xs'
+                : 'text-slate-500 hover:text-slate-900'
+            }`}
+          >
+            <AlertTriangle className="w-4 h-4 text-amber-600" />
+            الراكد (Dead Stock)
           </button>
         </div>
 
@@ -705,6 +741,251 @@ export const ReportsView: React.FC = () => {
                         <td className="p-3 text-center text-slate-600 font-bold">{item.invoicesCount}</td>
                         <td className="p-3 font-black text-emerald-800 text-sm">
                           {Number(item.totalRevenue).toLocaleString()} د.ع
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Net Profit (P&L) Tab View */}
+      {activeTab === 'net_profit' && netProfitReport && (
+        <div className="flex flex-col gap-5">
+          {/* Key Metrics Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+                <span>صافي الإيرادات</span>
+                <DollarSign className="w-4 h-4 text-blue-600" />
+              </div>
+              <div className="text-xl font-black text-slate-900 mt-2 font-mono">
+                {Number(netProfitReport.revenue.netSales).toLocaleString()} د.ع
+              </div>
+              <div className="text-[10px] text-slate-400 mt-1">بعد الخصومات والمرتجعات</div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+                <span>تكلفة البضاعة (COGS)</span>
+                <ShoppingBag className="w-4 h-4 text-amber-600" />
+              </div>
+              <div className="text-xl font-black text-amber-900 mt-2 font-mono">
+                {Number(netProfitReport.cogs).toLocaleString()} د.ع
+              </div>
+              <div className="text-[10px] text-slate-400 mt-1">سعر شراء الأدوية المباعة</div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+                <span>مجمل الربح التجاري</span>
+                <TrendingUp className="w-4 h-4 text-indigo-600" />
+              </div>
+              <div className="text-xl font-black text-indigo-900 mt-2 font-mono">
+                {Number(netProfitReport.grossProfit).toLocaleString()} د.ع
+              </div>
+              <div className="text-[10px] text-slate-400 mt-1">(الإيراد - كلفة الشراء)</div>
+            </div>
+
+            <div className="bg-rose-50/60 p-4 rounded-2xl border border-rose-200 shadow-xs">
+              <div className="flex items-center justify-between text-rose-800 text-xs font-bold">
+                <span>المصاريف التشغيلية</span>
+                <TrendingDown className="w-4 h-4 text-rose-600" />
+              </div>
+              <div className="text-xl font-black text-rose-700 mt-2 font-mono">
+                {Number(netProfitReport.expenses.total).toLocaleString()} د.ع
+              </div>
+              <div className="text-[10px] text-rose-600 mt-1">رواتب، إيجار، كهرباء، نثريات</div>
+            </div>
+
+            <div className="bg-emerald-600 text-white p-4 rounded-2xl shadow-md">
+              <div className="flex items-center justify-between text-emerald-100 text-xs font-bold">
+                <span>صافي الربح الفعلي</span>
+                <DollarSign className="w-4 h-4 text-emerald-200" />
+              </div>
+              <div className="text-2xl font-black mt-2 font-mono">
+                {Number(netProfitReport.netProfit).toLocaleString()} د.ع
+              </div>
+              <div className="text-[11px] text-emerald-100 mt-1 font-bold">
+                هامش الربح: {netProfitReport.netProfitMarginPercent}%
+              </div>
+            </div>
+          </div>
+
+          {/* Expenses Breakdown by Category */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+              <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                <Layers className="w-4 h-4 text-slate-600" />
+                تفصيل المصاريف التشغيلية للفترة
+              </h2>
+              <span className="text-xs text-slate-500 font-bold">
+                إجمالي المصاريف: {Number(netProfitReport.expenses.total).toLocaleString()} د.ع
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-right text-xs">
+                <thead className="bg-slate-100/75 text-slate-700 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="p-3">فئة المصروف</th>
+                    <th className="p-3">المبلغ الإجمالي</th>
+                    <th className="p-3 text-center">النسبة من إجمالي المصاريف</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium">
+                  {Object.keys(netProfitReport.expenses.byCategory || {}).length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="p-8 text-center text-slate-400 font-bold">
+                        لا توجد مصاريف مسجلة في هذه الفترة
+                      </td>
+                    </tr>
+                  ) : (
+                    Object.entries(netProfitReport.expenses.byCategory).map(([cat, amt]: any) => {
+                      const pct =
+                        netProfitReport.expenses.total > 0
+                          ? ((Number(amt) / netProfitReport.expenses.total) * 100).toFixed(1)
+                          : '0';
+                      return (
+                        <tr key={cat} className="hover:bg-slate-50">
+                          <td className="p-3 font-bold text-slate-900">{cat}</td>
+                          <td className="p-3 font-mono font-black text-rose-600 text-sm">
+                            {Number(amt).toLocaleString()} د.ع
+                          </td>
+                          <td className="p-3 text-center font-mono font-bold text-slate-600">{pct}%</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. Dead Stock (Stagnant Inventory) Tab View */}
+      {activeTab === 'dead_stock' && (
+        <div className="flex flex-col gap-5">
+          {/* Days Threshold & Action Bar */}
+          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-700">فترة الركود (عدم البيع):</span>
+              <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+                {[30, 60, 90, 180].map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setDeadStockDays(d)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      deadStockDays === d
+                        ? 'bg-amber-500 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {d} يوم
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  if (!deadStockReport?.items) return;
+                  const rows = deadStockReport.items.map((it: any) => [
+                    it.tradeName,
+                    it.scientificName || '',
+                    it.barcode || '',
+                    it.totalUnitsRemaining,
+                    it.sellingPricePack,
+                    it.stagnantCapital,
+                    it.lastSoldAt ? new Date(it.lastSoldAt).toLocaleDateString('ar-IQ') : 'لم يُباع قط',
+                  ]);
+                  exportToCSV(
+                    'تقرير_الراكد_دوائي',
+                    rows,
+                    ['اسم الدواء', 'الاسم العلمي', 'الباركود', 'الكمية', 'سعر البيع', 'رأس المال المجمد', 'آخر بيع'],
+                  );
+                }}
+                className="flex items-center gap-1 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold border border-emerald-200 transition-colors cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                تصدير Excel (CSV)
+              </button>
+            </div>
+          </div>
+
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="bg-amber-50/70 p-5 rounded-2xl border border-amber-200 shadow-xs">
+              <div className="flex items-center justify-between text-amber-900 text-xs font-bold">
+                <span>إجمالي رأس المال المجمد (التكلفة)</span>
+                <AlertTriangle className="w-5 h-5 text-amber-600" />
+              </div>
+              <div className="text-2xl font-black text-amber-950 mt-2 font-mono">
+                {Number(deadStockReport?.summary?.totalStagnantCapital || 0).toLocaleString()} د.ع
+              </div>
+              <div className="text-[11px] text-amber-800 font-medium mt-1">
+                سيولة محبوسة في بضاعة راكدة لم تتحرك لأكثر من {deadStockDays} يوم
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between text-slate-500 text-xs font-bold">
+                <span>عدد الأدوية الراكدة</span>
+                <Package className="w-5 h-5 text-slate-400" />
+              </div>
+              <div className="text-2xl font-black text-slate-900 mt-2 font-mono">
+                {deadStockReport?.summary?.totalStagnantItemsCount || 0} دواء
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1 font-bold">
+                يُنصح بعمل عروض ترويجية أو إرجاعها للمذاخر
+              </div>
+            </div>
+          </div>
+
+          {/* Dead Stock Table */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-right text-xs">
+                <thead className="bg-slate-100/75 text-slate-700 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="p-3">اسم الدواء</th>
+                    <th className="p-3">الاسم العلمي</th>
+                    <th className="p-3 text-center">الكمية بالمخزن</th>
+                    <th className="p-3">سعر البيع</th>
+                    <th className="p-3">رأس المال المجمد</th>
+                    <th className="p-3">تاريخ آخر بيع</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                  {!deadStockReport?.items || deadStockReport.items.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-400 font-bold">
+                        ممتاز! لا توجد أدوية راكدة متجاوزة {deadStockDays} يوماً
+                      </td>
+                    </tr>
+                  ) : (
+                    deadStockReport.items.map((it: any) => (
+                      <tr key={it.inventoryItemId} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-3 font-bold text-slate-900">{it.tradeName}</td>
+                        <td className="p-3 text-slate-500">{it.scientificName || '—'}</td>
+                        <td className="p-3 text-center font-bold font-mono text-amber-800">
+                          {it.totalUnitsRemaining} وحدة
+                        </td>
+                        <td className="p-3 font-mono">{Number(it.sellingPricePack).toLocaleString()} د.ع</td>
+                        <td className="p-3 font-black text-rose-600 font-mono text-sm">
+                          {Number(it.stagnantCapital).toLocaleString()} د.ع
+                        </td>
+                        <td className="p-3 font-mono text-slate-500">
+                          {it.lastSoldAt ? (
+                            new Date(it.lastSoldAt).toLocaleDateString('ar-IQ')
+                          ) : (
+                            <span className="text-rose-500 font-bold">لم يُباع قط</span>
+                          )}
                         </td>
                       </tr>
                     ))

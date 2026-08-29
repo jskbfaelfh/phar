@@ -41,4 +41,14 @@ export class ReportsController {
   async getDebtsReport(@Query() query: DateRangeDto) {
     return this.reportsService.getDebtsReport(query);
   }
+
+  @Get('net-profit')
+  async getNetProfitReport(@Query() query: DateRangeDto) {
+    return this.reportsService.getNetProfitReport(query);
+  }
+
+  @Get('dead-stock')
+  async getDeadStockReport(@Query('days') days?: number) {
+    return this.reportsService.getDeadStockReport(days ? Number(days) : 60);
+  }
 }

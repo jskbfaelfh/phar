@@ -6,6 +6,7 @@ import {
   Param,
   Query,
   UseGuards,
+  Request,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { PosService } from './pos.service';
@@ -45,5 +46,15 @@ export class PosController {
   @Get('sales/:id')
   async getSaleById(@Param('id') id: string) {
     return this.posService.getSaleById(id);
+  }
+
+  @Post('shifts/close')
+  async closeShift(@Request() req: any, @Body() dto: { actualCash: number; openingCash?: number; notes?: string }) {
+    return this.posService.closeShiftHandover(req.user, dto);
+  }
+
+  @Get('shifts/history')
+  async getShiftHistory(@Query('limit') limit?: number) {
+    return this.posService.getShiftHistory(limit ? Number(limit) : 30);
   }
 }

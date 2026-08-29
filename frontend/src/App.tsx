@@ -13,27 +13,38 @@ import {
   UserCheck,
   Settings,
   Banknote,
+  FileText,
+  TrendingDown,
+  LayoutDashboard,
 } from 'lucide-react';
 import { PosView } from './views/PosView';
 import { BulkStockEntryView } from './views/BulkStockEntryView';
 import { InventoryView } from './views/InventoryView';
+import { PurchasesView } from './views/PurchasesView';
+import { ExpensesView } from './views/ExpensesView';
+import { OwnerMobileDashboardView } from './views/OwnerMobileDashboardView';
 import { ReportsView } from './views/ReportsView';
 import { SuperAdminView } from './views/SuperAdminView';
 import { PublicSearchView } from './views/PublicSearchView';
 import { PharmacyProfileView } from './views/PharmacyProfileView';
 import { SuppliersDebtView } from './views/SuppliersDebtView';
 import { LoginView } from './views/LoginView';
+import { ProactiveAlertsModal } from './components/ProactiveAlertsModal';
 import {
   getAuthToken,
   getStoredUser,
   getStoredPharmacy,
   clearAuthToken,
+  apiRequest,
 } from './api/client';
 
 type ActiveTab =
   | 'POS'
   | 'BULK_STOCK'
   | 'INVENTORY'
+  | 'PURCHASES'
+  | 'EXPENSES'
+  | 'OWNER_DASHBOARD'
   | 'SUPPLIERS'
   | 'REPORTS'
   | 'PROFILE'
@@ -46,6 +57,11 @@ export const App: React.FC = () => {
   const [currentPharmacy, setCurrentPharmacy] = useState<any | null>(getStoredPharmacy());
   const [activeTab, setActiveTab] = useState<ActiveTab>('PUBLIC_SEARCH');
 
+  // Proactive Alerts State
+  const [expiringAlerts, setExpiringAlerts] = useState<any[]>([]);
+  const [lowStockAlerts, setLowStockAlerts] = useState<any[]>([]);
+  const [showAlertModal, setShowAlertModal] = useState<boolean>(false);
+
   // If token exists on first load, switch to POS or Admin
   useEffect(() => {
     const token = getAuthToken();
@@ -57,6 +73,26 @@ export const App: React.FC = () => {
       }
     }
   }, []);
+
+  // Proactive alert check on startup
+  useEffect(() => {
+    if (currentUser && currentUser.role !== 'SUPER_ADMIN') {
+      const alreadyChecked = sessionStorage.getItem('dawaee_alerts_dismissed');
+      if (!alreadyChecked) {
+        Promise.all([
+          apiRequest<any[]>('/inventory/expiring-soon').catch(() => []),
+          apiRequest<any[]>('/inventory/low-stock').catch(() => []),
+        ]).then(([expiring, lowStock]) => {
+          if ((expiring && expiring.length > 0) || (lowStock && lowStock.length > 0)) {
+            setExpiringAlerts(expiring || []);
+            setLowStockAlerts(lowStock || []);
+            setShowAlertModal(true);
+            sessionStorage.setItem('dawaee_alerts_dismissed', 'true');
+          }
+        });
+      }
+    }
+  }, [currentUser]);
 
   const handleLoginSuccess = (user: any, pharmacy?: any) => {
     setCurrentUser(user);
@@ -76,7 +112,6 @@ export const App: React.FC = () => {
     setActiveTab('LOGIN');
   };
 
-  // If viewing public search screen
   // If viewing public search screen (Pure Public Portal)
   if (activeTab === 'PUBLIC_SEARCH') {
     return (
@@ -147,7 +182,7 @@ export const App: React.FC = () => {
           </div>
 
           {/* Navigation Links */}
-          <nav className="flex items-center gap-1">
+          <nav className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
             {currentUser?.role === 'SUPER_ADMIN' ? (
               <button
                 onClick={() => setActiveTab('ADMIN')}
@@ -164,9 +199,9 @@ export const App: React.FC = () => {
               <>
                 <button
                   onClick={() => setActiveTab('POS')}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                     activeTab === 'POS'
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs font-black'
                       : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -175,22 +210,10 @@ export const App: React.FC = () => {
                 </button>
 
                 <button
-                  onClick={() => setActiveTab('BULK_STOCK')}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    activeTab === 'BULK_STOCK'
-                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs'
-                      : 'text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <PackagePlus className="w-4 h-4" />
-                  إدخال وجبة
-                </button>
-
-                <button
                   onClick={() => setActiveTab('INVENTORY')}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                     activeTab === 'INVENTORY'
-                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs'
+                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs font-black'
                       : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -198,12 +221,50 @@ export const App: React.FC = () => {
                   المخزون
                 </button>
 
+                <button
+                  onClick={() => setActiveTab('PURCHASES')}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                    activeTab === 'PURCHASES'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs font-black'
+                      : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  <FileText className="w-4 h-4" />
+                  المشتريات
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('BULK_STOCK')}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                    activeTab === 'BULK_STOCK'
+                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs font-black'
+                      : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  <PackagePlus className="w-4 h-4" />
+                  إدخال وجبة
+                </button>
+
+                {currentUser?.role === 'OWNER' && (
+                  <button
+                    onClick={() => setActiveTab('EXPENSES')}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                      activeTab === 'EXPENSES'
+                        ? 'bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs font-black'
+                        : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <TrendingDown className="w-4 h-4" />
+                    المصاريف
+                  </button>
+                )}
+
                 {currentUser?.role === 'OWNER' && (
                   <button
                     onClick={() => setActiveTab('SUPPLIERS')}
-                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                       activeTab === 'SUPPLIERS'
-                        ? 'bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs'
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200 shadow-2xs font-black'
                         : 'text-slate-600 hover:bg-slate-50'
                     }`}
                   >
@@ -215,9 +276,9 @@ export const App: React.FC = () => {
                 {currentUser?.role === 'OWNER' && (
                   <button
                     onClick={() => setActiveTab('REPORTS')}
-                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                       activeTab === 'REPORTS'
-                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs'
+                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs font-black'
                         : 'text-slate-600 hover:bg-slate-50'
                     }`}
                   >
@@ -228,10 +289,25 @@ export const App: React.FC = () => {
 
                 {currentUser?.role === 'OWNER' && (
                   <button
+                    onClick={() => setActiveTab('OWNER_DASHBOARD')}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                      activeTab === 'OWNER_DASHBOARD'
+                        ? 'bg-slate-900 text-white shadow-2xs font-black'
+                        : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                    title="لوحة المتابعة اللحظية للمالك"
+                  >
+                    <LayoutDashboard className="w-4 h-4 text-emerald-400" />
+                    متابعة المالك
+                  </button>
+                )}
+
+                {currentUser?.role === 'OWNER' && (
+                  <button
                     onClick={() => setActiveTab('PROFILE')}
-                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                       activeTab === 'PROFILE'
-                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs'
+                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs font-black'
                         : 'text-slate-600 hover:bg-slate-50'
                     }`}
                   >
@@ -293,11 +369,27 @@ export const App: React.FC = () => {
         {activeTab === 'POS' && <PosView />}
         {activeTab === 'BULK_STOCK' && <BulkStockEntryView />}
         {activeTab === 'INVENTORY' && <InventoryView />}
+        {activeTab === 'PURCHASES' && <PurchasesView />}
+        {activeTab === 'EXPENSES' && <ExpensesView />}
+        {activeTab === 'OWNER_DASHBOARD' && <OwnerMobileDashboardView />}
         {activeTab === 'SUPPLIERS' && <SuppliersDebtView />}
         {activeTab === 'REPORTS' && <ReportsView />}
         {activeTab === 'PROFILE' && <PharmacyProfileView />}
         {activeTab === 'ADMIN' && <SuperAdminView />}
       </main>
+
+      {/* Proactive Expiry & Low Stock Alerts Modal */}
+      {showAlertModal && (
+        <ProactiveAlertsModal
+          expiringItems={expiringAlerts}
+          lowStockItems={lowStockAlerts}
+          onClose={() => setShowAlertModal(false)}
+          onNavigateToInventory={() => {
+            setShowAlertModal(false);
+            setActiveTab('INVENTORY');
+          }}
+        />
+      )}
     </div>
   );
 };

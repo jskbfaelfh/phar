@@ -342,4 +342,196 @@ export class ReportsService {
       };
     }
   }
+
+  /**
+   * Comprehensive Net Profit (P&L) Report with Operating Expenses Breakdown
+   */
+  async getNetProfitReport(dto: DateRangeDto) {
+    const schemaName = this.tenantContext.getSchemaName();
+
+    let dateFilter = '';
+    const params: any[] = [];
+
+    if (dto.from && dto.to) {
+      params.push(`${dto.from} 00:00:00`, `${dto.to} 23:59:59`);
+      dateFilter = `WHERE s.created_at >= $1::timestamp AND s.created_at <= $2::timestamp`;
+    } else if (dto.from) {
+      params.push(`${dto.from} 00:00:00`);
+      dateFilter = `WHERE s.created_at >= $1::timestamp`;
+    }
+
+    // 1. Sales Revenue
+    const salesSql = `
+      SELECT 
+        COUNT(s.id)::int as "totalInvoicesCount",
+        COALESCE(SUM(s.subtotal), 0)::numeric as "grossSales",
+        COALESCE(SUM(s.discount_amount), 0)::numeric as "totalDiscounts",
+        COALESCE(SUM(s.total_amount), 0)::numeric as "netRevenue"
+      FROM "${schemaName}".sales s
+      ${dateFilter};
+    `;
+    const salesStats: any[] = await this.prisma.$queryRawUnsafe(salesSql, ...params);
+    const s = salesStats[0] || { totalInvoicesCount: 0, grossSales: 0, totalDiscounts: 0, netRevenue: 0 };
+
+    // 2. Returns
+    let returnDateFilter = '';
+    if (dto.from && dto.to) {
+      returnDateFilter = `WHERE r.created_at >= $1::timestamp AND r.created_at <= $2::timestamp`;
+    } else if (dto.from) {
+      returnDateFilter = `WHERE r.created_at >= $1::timestamp`;
+    }
+    const returnsSql = `
+      SELECT 
+        COUNT(r.id)::int as "totalReturnsCount",
+        COALESCE(SUM(r.refund_amount), 0)::numeric as "totalRefunds"
+      FROM "${schemaName}".returns r
+      ${returnDateFilter};
+    `;
+    const returnsStats: any[] = await this.prisma.$queryRawUnsafe(returnsSql, ...params);
+    const r = returnsStats[0] || { totalReturnsCount: 0, totalRefunds: 0 };
+
+    // 3. COGS
+    let cogsDateFilter = '';
+    if (dto.from && dto.to) {
+      cogsDateFilter = `WHERE s.created_at >= $1::timestamp AND s.created_at <= $2::timestamp`;
+    } else if (dto.from) {
+      cogsDateFilter = `WHERE s.created_at >= $1::timestamp`;
+    }
+    const cogsSql = `
+      SELECT 
+        COALESCE(SUM(
+          CASE 
+            WHEN si.unit_type = 'PACK' THEN si.quantity * COALESCE(b.purchase_price_pack, 0)
+            ELSE (si.quantity::numeric / GREATEST(ii.units_per_pack, 1)) * COALESCE(b.purchase_price_pack, 0)
+          END
+        ), 0)::numeric as "cogs"
+      FROM "${schemaName}".sale_items si
+      JOIN "${schemaName}".sales s ON si.sale_id = s.id
+      JOIN "${schemaName}".inventory_items ii ON si.inventory_item_id = ii.id
+      LEFT JOIN "${schemaName}".inventory_batches b ON si.inventory_batch_id = b.id
+      ${cogsDateFilter};
+    `;
+    const cogsStats: any[] = await this.prisma.$queryRawUnsafe(cogsSql, ...params);
+    const cogs = Number(cogsStats[0]?.cogs || 0);
+
+    // 4. Operating Expenses
+    let expDateFilter = '';
+    const expParams: any[] = [];
+    if (dto.from && dto.to) {
+      expParams.push(dto.from, dto.to);
+      expDateFilter = `WHERE expense_date >= $1::date AND expense_date <= $2::date`;
+    } else if (dto.from) {
+      expParams.push(dto.from);
+      expDateFilter = `WHERE expense_date >= $1::date`;
+    }
+
+    let totalExpenses = 0;
+    let expensesByCategory: Record<string, number> = {};
+
+    try {
+      const expensesQuery = `
+        SELECT category, SUM(amount)::numeric as total
+        FROM "${schemaName}".expenses
+        ${expDateFilter}
+        GROUP BY category;
+      `;
+      const expRows: any[] = await this.prisma.$queryRawUnsafe(expensesQuery, ...expParams);
+      for (const row of expRows) {
+        const amt = Number(row.total || 0);
+        expensesByCategory[row.category] = amt;
+        totalExpenses += amt;
+      }
+    } catch {
+      // If expenses table not yet populated
+    }
+
+    const netSales = Number(s.netRevenue) - Number(r.totalRefunds);
+    const grossProfit = netSales - cogs;
+    const netProfit = grossProfit - totalExpenses;
+    const netProfitMarginPercent = netSales > 0 ? Number(((netProfit / netSales) * 100).toFixed(2)) : 0;
+
+    return {
+      period: {
+        from: dto.from || 'البداية',
+        to: dto.to || 'الآن',
+      },
+      revenue: {
+        grossSales: Number(s.grossSales),
+        totalDiscounts: Number(s.totalDiscounts),
+        totalRefunds: Number(r.totalRefunds),
+        netSales,
+      },
+      cogs,
+      grossProfit,
+      expenses: {
+        total: totalExpenses,
+        byCategory: expensesByCategory,
+      },
+      netProfit,
+      netProfitMarginPercent,
+    };
+  }
+
+  /**
+   * Dead Stock (Stagnant Inventory) Analytics Report
+   */
+  async getDeadStockReport(thresholdDays: number = 60) {
+    const schemaName = this.tenantContext.getSchemaName();
+    const days = Number(thresholdDays) || 60;
+
+    const sql = `
+      SELECT 
+        ii.id as "inventoryItemId",
+        m.trade_name as "tradeName",
+        m.scientific_name as "scientificName",
+        m.barcode,
+        ii.units_per_pack as "unitsPerPack",
+        ii.selling_price_pack as "sellingPricePack",
+        COALESCE(SUM(b.quantity_units_remaining), 0)::int as "totalUnitsRemaining",
+        COALESCE(
+          SUM((b.quantity_units_remaining::numeric / GREATEST(ii.units_per_pack, 1)) * COALESCE(b.purchase_price_pack, 0)),
+          0
+        )::numeric as "stagnantCapital",
+        MAX(s.created_at) as "lastSoldAt"
+      FROM "${schemaName}".inventory_items ii
+      JOIN public.medicines m ON ii.medicine_id = m.id
+      LEFT JOIN "${schemaName}".inventory_batches b ON ii.id = b.inventory_item_id
+      LEFT JOIN "${schemaName}".sale_items si ON ii.id = si.inventory_item_id
+      LEFT JOIN "${schemaName}".sales s ON si.sale_id = s.id
+      GROUP BY ii.id, m.trade_name, m.scientific_name, m.barcode, ii.units_per_pack, ii.selling_price_pack
+      HAVING 
+        COALESCE(SUM(b.quantity_units_remaining), 0) > 0
+        AND (
+          MAX(s.created_at) IS NULL 
+          OR MAX(s.created_at) < (CURRENT_TIMESTAMP - INTERVAL '${days} days')
+        )
+      ORDER BY "stagnantCapital" DESC
+      LIMIT 100;
+    `;
+
+    try {
+      const items: any[] = await this.prisma.$queryRawUnsafe(sql);
+      let totalStagnantCapital = 0;
+      let totalStagnantItemsCount = items.length;
+
+      for (const it of items) {
+        totalStagnantCapital += Number(it.stagnantCapital || 0);
+      }
+
+      return {
+        thresholdDays: days,
+        summary: {
+          totalStagnantItemsCount,
+          totalStagnantCapital,
+        },
+        items: items || [],
+      };
+    } catch {
+      return {
+        thresholdDays: days,
+        summary: { totalStagnantItemsCount: 0, totalStagnantCapital: 0 },
+        items: [],
+      };
+    }
+  }
 }
