@@ -1,6 +1,7 @@
 import {
   IsOptional,
   IsString,
+  IsBoolean,
   IsNotEmpty,
   MinLength,
 } from 'class-validator';
@@ -43,18 +44,23 @@ export class UpdatePharmacyProfileDto {
   receiptFooter?: string;
 
   @IsOptional()
+  @IsBoolean()
   isSearchVisible?: boolean;
 
   @IsOptional()
+  @IsBoolean()
   showSellingPrices?: boolean;
 
   @IsOptional()
+  @IsBoolean()
   showPhoneNumber?: boolean;
 
   @IsOptional()
+  @IsBoolean()
   showWhatsapp?: boolean;
 
   @IsOptional()
+  @IsBoolean()
   is24Hours?: boolean;
 
   @IsOptional()
