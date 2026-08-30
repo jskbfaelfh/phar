@@ -19,10 +19,15 @@ import {
   Mic,
   MicOff,
   Check,
+  UserCheck,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 
-export const PublicSearchView: React.FC = () => {
+interface PublicSearchViewProps {
+  onNavigateToLogin?: () => void;
+}
+
+export const PublicSearchView: React.FC<PublicSearchViewProps> = ({ onNavigateToLogin }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [governorate, setGovernorate] = useState('');
   const [district, setDistrict] = useState('');
@@ -467,6 +472,17 @@ const IRAQ_COORDINATES: Record<string, { lat: number; lng: number }> = {
           </div>
 
           <div className="flex items-center gap-2">
+            {onNavigateToLogin && (
+              <button
+                onClick={onNavigateToLogin}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-black transition-all cursor-pointer shadow-xs active:scale-95 hover:border-emerald-500/60"
+                title="تسجيل دخول الصيادلة والمدراء"
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>دخول الصيادلة 🔑</span>
+              </button>
+            )}
+
             <button
               onClick={handleSharePlatform}
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"

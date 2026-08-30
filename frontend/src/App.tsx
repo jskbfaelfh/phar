@@ -62,20 +62,85 @@ type ActiveTab =
   | 'PUBLIC_SEARCH'
   | 'LOGIN';
 
+const getInitialTab = (): ActiveTab => {
+  try {
+    const path = (window.location.pathname || '').toLowerCase();
+    const hash = (window.location.hash || '').toLowerCase();
+    const search = (window.location.search || '').toLowerCase();
+
+    const isLoginUrl =
+      path === '/login' ||
+      path.startsWith('/login') ||
+      hash === '#login' ||
+      hash.startsWith('#login') ||
+      search.includes('login') ||
+      search.includes('tab=login');
+
+    const isSearchUrl =
+      path === '/search' ||
+      hash === '#search' ||
+      search.includes('search');
+
+    const token = getAuthToken();
+    const user = getStoredUser();
+
+    if (isLoginUrl) {
+      return 'LOGIN';
+    }
+
+    if (token && user) {
+      if (isSearchUrl) return 'PUBLIC_SEARCH';
+      return user.role === 'SUPER_ADMIN' ? 'ADMIN' : 'POS';
+    }
+
+    return 'PUBLIC_SEARCH';
+  } catch {
+    return 'PUBLIC_SEARCH';
+  }
+};
+
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<any | null>(getStoredUser());
   const [currentPharmacy, setCurrentPharmacy] = useState<any | null>(getStoredPharmacy());
   const [branches, setBranches] = useState<any[]>(getStoredBranches());
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState<boolean>(false);
   const [isSwitchingBranch, setIsSwitchingBranch] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
-    const token = getAuthToken();
-    const user = getStoredUser();
-    if (token && user) {
-      return user.role === 'SUPER_ADMIN' ? 'ADMIN' : 'POS';
+  const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
+
+  // Sync browser URL & listen to Back/Forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      setActiveTab(getInitialTab());
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('hashchange', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('hashchange', handlePopState);
+    };
+  }, []);
+
+  const navigateToTab = (tab: ActiveTab) => {
+    setActiveTab(tab);
+    try {
+      if (tab === 'LOGIN') {
+        if (window.location.pathname !== '/login' && window.location.hash !== '#login') {
+          window.history.pushState(null, '', '/login');
+        }
+      } else if (tab === 'PUBLIC_SEARCH') {
+        if (window.location.pathname === '/login') {
+          window.history.pushState(null, '', '/');
+        }
+      } else {
+        if (window.location.pathname === '/login') {
+          window.history.pushState(null, '', '/');
+        }
+      }
+    } catch {
+      // Fallback
     }
-    return 'PUBLIC_SEARCH';
-  });
+  };
 
   // Sidebar collapsible state (persisted)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -125,9 +190,9 @@ export const App: React.FC = () => {
     }
 
     if (user.role === 'SUPER_ADMIN') {
-      setActiveTab('ADMIN');
+      navigateToTab('ADMIN');
     } else {
-      setActiveTab('POS');
+      navigateToTab('POS');
     }
   };
 
@@ -165,7 +230,7 @@ export const App: React.FC = () => {
     setCurrentUser(null);
     setCurrentPharmacy(null);
     setBranches([]);
-    setActiveTab('LOGIN');
+    navigateToTab('LOGIN');
   };
 
   // If viewing public search screen (Pure Public Portal)
@@ -179,7 +244,7 @@ export const App: React.FC = () => {
               معاينة شبكة البحث العامة للمواطنين (حساب الصيدلية نشط)
             </span>
             <button
-              onClick={() => setActiveTab(currentUser.role === 'SUPER_ADMIN' ? 'ADMIN' : 'POS')}
+              onClick={() => navigateToTab(currentUser.role === 'SUPER_ADMIN' ? 'ADMIN' : 'POS')}
               className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs transition-all shadow-xs cursor-pointer"
             >
               العودة لإدارة الصيدلية
@@ -187,14 +252,19 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        <PublicSearchView />
+        <PublicSearchView onNavigateToLogin={() => navigateToTab('LOGIN')} />
       </div>
     );
   }
 
   // If viewing Login screen
-  if (activeTab === 'LOGIN' && !currentUser) {
-    return <LoginView onLoginSuccess={handleLoginSuccess} />;
+  if (activeTab === 'LOGIN') {
+    return (
+      <LoginView
+        onLoginSuccess={handleLoginSuccess}
+        onNavigateToSearch={() => navigateToTab('PUBLIC_SEARCH')}
+      />
+    );
   }
 
   // Helper navigation item component

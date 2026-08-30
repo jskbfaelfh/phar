@@ -6,14 +6,16 @@ import {
   User,
   AlertCircle,
   Pill,
+  Search,
 } from 'lucide-react';
 import { apiRequest, setAuthToken, setStoredBranches } from '../api/client';
 
 interface LoginViewProps {
   onLoginSuccess: (user: any, pharmacy?: any, branches?: any[]) => void;
+  onNavigateToSearch?: () => void;
 }
 
-export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
+export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, onNavigateToSearch }) => {
   const [activeTab, setActiveTab] = useState<'PHARMACY' | 'ADMIN'>('PHARMACY');
   const [pharmacySlug, setPharmacySlug] = useState('pharmacy_baghdad_1');
   const [username, setUsername] = useState('owner_ali');
@@ -220,6 +222,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               {loading ? 'جاري الدخول...' : 'دخول إلى لوحة Super Admin'}
             </button>
           </form>
+        )}
+
+        {onNavigateToSearch && (
+          <div className="mt-6 pt-4 border-t border-slate-100 text-center">
+            <button
+              type="button"
+              onClick={onNavigateToSearch}
+              className="text-xs font-bold text-slate-500 hover:text-emerald-600 flex items-center justify-center gap-1.5 mx-auto transition-colors cursor-pointer"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span>الذهاب إلى محرك البحث الدوائي للجمهور</span>
+            </button>
+          </div>
         )}
       </div>
     </div>
