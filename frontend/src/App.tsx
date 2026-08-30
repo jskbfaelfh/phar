@@ -18,6 +18,9 @@ import {
   X,
   ChevronRight,
   ChevronLeft,
+  Building2,
+  ChevronDown,
+  RefreshCw,
 } from 'lucide-react';
 import { PosView } from './views/PosView';
 import { BulkStockEntryView } from './views/BulkStockEntryView';
@@ -30,12 +33,16 @@ import { SuperAdminView } from './views/SuperAdminView';
 import { PublicSearchView } from './views/PublicSearchView';
 import { PharmacyProfileView } from './views/PharmacyProfileView';
 import { SuppliersDebtView } from './views/SuppliersDebtView';
+import { ChainManagementView } from './views/ChainManagementView';
 import { LoginView } from './views/LoginView';
 import { ProactiveAlertsModal } from './components/ProactiveAlertsModal';
 import {
   getAuthToken,
+  setAuthToken,
   getStoredUser,
   getStoredPharmacy,
+  getStoredBranches,
+  setStoredBranches,
   clearAuthToken,
   apiRequest,
 } from './api/client';
@@ -46,6 +53,7 @@ type ActiveTab =
   | 'INVENTORY'
   | 'PURCHASES'
   | 'EXPENSES'
+  | 'CHAIN'
   | 'OWNER_DASHBOARD'
   | 'SUPPLIERS'
   | 'REPORTS'
@@ -57,6 +65,9 @@ type ActiveTab =
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<any | null>(getStoredUser());
   const [currentPharmacy, setCurrentPharmacy] = useState<any | null>(getStoredPharmacy());
+  const [branches, setBranches] = useState<any[]>(getStoredBranches());
+  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState<boolean>(false);
+  const [isSwitchingBranch, setIsSwitchingBranch] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('PUBLIC_SEARCH');
 
   // Sidebar collapsible state (persisted)
@@ -111,9 +122,12 @@ export const App: React.FC = () => {
     }
   }, [currentUser]);
 
-  const handleLoginSuccess = (user: any, pharmacy?: any) => {
+  const handleLoginSuccess = (user: any, pharmacy?: any, branchList?: any[]) => {
     setCurrentUser(user);
     setCurrentPharmacy(pharmacy || null);
+    if (branchList) {
+      setBranches(branchList);
+    }
 
     if (user.role === 'SUPER_ADMIN') {
       setActiveTab('ADMIN');
@@ -122,10 +136,40 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleSwitchBranch = async (targetTenantId: string) => {
+    if (isSwitchingBranch) return;
+    setIsSwitchingBranch(true);
+    setIsBranchDropdownOpen(false);
+
+    try {
+      const res = await apiRequest<any>('/auth/switch-branch', {
+        method: 'POST',
+        body: JSON.stringify({ targetTenantId }),
+      });
+
+      setAuthToken(res.accessToken);
+      localStorage.setItem('dawaee_user', JSON.stringify(res.user));
+      localStorage.setItem('dawaee_pharmacy', JSON.stringify(res.pharmacy));
+      if (res.branches) {
+        setStoredBranches(res.branches);
+        setBranches(res.branches);
+      }
+
+      setCurrentUser(res.user);
+      setCurrentPharmacy(res.pharmacy);
+    } catch (err: any) {
+      alert(err.message || 'فشل التبديل إلى الفرع المحدد');
+    } finally {
+      setIsSwitchingBranch(false);
+    }
+  };
+
   const handleLogout = () => {
     clearAuthToken();
+    localStorage.removeItem('dawaee_branches');
     setCurrentUser(null);
     setCurrentPharmacy(null);
+    setBranches([]);
     setActiveTab('LOGIN');
   };
 
@@ -365,6 +409,13 @@ export const App: React.FC = () => {
                 <>
                   <SectionHeading title="المتابعة والإعدادات" />
                   <NavItem
+                    tab="CHAIN"
+                    label="إدارة الفروع والسلسلة"
+                    icon={Building2}
+                    badge={branches.length > 1 ? `${branches.length} فروع` : undefined}
+                    activeColor="bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                  />
+                  <NavItem
                     tab="OWNER_DASHBOARD"
                     label="متابعة المالك (Live)"
                     icon={LayoutDashboard}
@@ -448,6 +499,7 @@ export const App: React.FC = () => {
                 {activeTab === 'PURCHASES' && 'أرشيف وفواتير المشتريات'}
                 {activeTab === 'BULK_STOCK' && 'إدخال وجبة أدوية'}
                 {activeTab === 'EXPENSES' && 'المصاريف التشغيلية وصافي الأرباح'}
+                {activeTab === 'CHAIN' && 'إدارة شبكة الفروع وسلاسل الصيدليات'}
                 {activeTab === 'SUPPLIERS' && 'المذاخر وحسابات الديون'}
                 {activeTab === 'REPORTS' && 'التقارير والأرباح P&L'}
                 {activeTab === 'OWNER_DASHBOARD' && 'لوحة المتابعة اللحظية للمالك'}
@@ -458,6 +510,95 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Branch Switcher Dropdown (For Owner with multiple branches or chain) */}
+            {currentUser?.role === 'OWNER' && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200/80 rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs active:scale-95"
+                >
+                  <Building2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span className="max-w-[120px] sm:max-w-[160px] truncate">
+                    {currentPharmacy?.name || 'الفرع الحالي'}
+                  </span>
+                  {branches.length > 1 && (
+                    <span className="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] flex items-center justify-center font-bold">
+                      {branches.length}
+                    </span>
+                  )}
+                  <ChevronDown className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                </button>
+
+                {/* Dropdown Menu */}
+                {isBranchDropdownOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setIsBranchDropdownOpen(false)}
+                    />
+                    <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                      <div className="px-3 py-2 text-[10px] font-black text-slate-400 border-b border-slate-100 uppercase tracking-wider flex items-center justify-between">
+                        <span>التبديل الفوري بين الفروع</span>
+                        {isSwitchingBranch && <RefreshCw className="w-3 h-3 animate-spin text-indigo-600" />}
+                      </div>
+
+                      <div className="py-1 max-h-48 overflow-y-auto divide-y divide-slate-50">
+                        {branches.map((b) => {
+                          const isCurrent = b.id === currentPharmacy?.id;
+                          return (
+                            <button
+                              key={b.id}
+                              onClick={() => {
+                                if (!isCurrent) {
+                                  handleSwitchBranch(b.id);
+                                } else {
+                                  setIsBranchDropdownOpen(false);
+                                }
+                              }}
+                              disabled={isSwitchingBranch}
+                              className={`w-full text-right px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                                isCurrent
+                                  ? 'bg-indigo-50 text-indigo-950 font-black'
+                                  : 'hover:bg-slate-50 text-slate-700 font-bold'
+                              }`}
+                            >
+                              <div className="truncate">
+                                <div>{b.name}</div>
+                                <div className="text-[10px] text-slate-400 font-normal">
+                                  {b.governorate} • {b.district}
+                                </div>
+                              </div>
+                              {isCurrent ? (
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-xs shrink-0" />
+                              ) : (
+                                <span className="text-[10px] text-indigo-600 font-bold shrink-0">
+                                  تبديل ⚡
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="pt-1.5 border-t border-slate-100 mt-1">
+                        <button
+                          onClick={() => {
+                            setIsBranchDropdownOpen(false);
+                            setActiveTab('CHAIN');
+                          }}
+                          className="w-full text-center py-2 bg-slate-900 hover:bg-indigo-600 text-white rounded-xl text-xs font-black transition-colors cursor-pointer flex items-center justify-center gap-1"
+                        >
+                          <Building2 className="w-3.5 h-3.5" />
+                          <span>إدارة وربط الفروع (لوحة السلسلة)</span>
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Quick Open Public Search button */}
             <button
               onClick={() => setActiveTab('PUBLIC_SEARCH')}
@@ -482,6 +623,14 @@ export const App: React.FC = () => {
           {activeTab === 'INVENTORY' && <InventoryView />}
           {activeTab === 'PURCHASES' && <PurchasesView />}
           {activeTab === 'EXPENSES' && <ExpensesView />}
+          {activeTab === 'CHAIN' && (
+            <ChainManagementView
+              onBranchSwitched={(newPh, newBr) => {
+                setCurrentPharmacy(newPh);
+                setBranches(newBr);
+              }}
+            />
+          )}
           {activeTab === 'OWNER_DASHBOARD' && <OwnerMobileDashboardView />}
           {activeTab === 'SUPPLIERS' && <SuppliersDebtView />}
           {activeTab === 'REPORTS' && <ReportsView />}

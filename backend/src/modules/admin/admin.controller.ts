@@ -17,6 +17,10 @@ import {
   UpdateSubscriptionDto,
   UpdateStatusDto,
   ResetPasswordDto,
+  AddBranchDto,
+  LinkTenantsDto,
+  BulkChainOnboardingDto,
+  MergeChainsDto,
 } from './dto/create-tenant.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -34,6 +38,29 @@ export class AdminController {
   @Post('tenants')
   async createTenant(@Body() dto: CreateTenantDto) {
     return this.adminService.createTenant(dto);
+  }
+
+  @Post('chains/onboard-bulk')
+  async onboardBulkChain(@Body() dto: BulkChainOnboardingDto) {
+    return this.adminService.onboardBulkChain(dto);
+  }
+
+  @Post('chains/merge-existing')
+  async mergeExistingIntoChain(@Body() dto: MergeChainsDto) {
+    return this.adminService.mergeExistingIntoChain(dto);
+  }
+
+  @Post('tenants/:id/add-branch')
+  async addBranchToTenant(
+    @Param('id') id: string,
+    @Body() dto: AddBranchDto,
+  ) {
+    return this.adminService.addBranchToTenant(id, dto);
+  }
+
+  @Post('chains/link-tenants')
+  async linkTenantsIntoChain(@Body() dto: LinkTenantsDto) {
+    return this.adminService.linkTenantsIntoChain(dto);
   }
 
   @Get('tenants')

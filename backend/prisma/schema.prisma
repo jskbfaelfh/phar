@@ -50,12 +50,59 @@ model Tenant {
   showWhatsapp       Boolean            @default(true) @map("show_whatsapp")
   is24Hours          Boolean            @default(false) @map("is_24_hours")
   geminiApiKey       String?            @map("gemini_api_key") @db.Text
+  chainId            String?            @map("chain_id") @db.Uuid
+  chainRole          String?            @default("BRANCH") @map("chain_role") @db.VarChar(50)
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
 
-  searchIndexes CentralSearchIndex[]
+  chain              PharmacyChain?     @relation(fields: [chainId], references: [id], onDelete: SetNull)
+  searchIndexes      CentralSearchIndex[]
 
   @@map("tenants")
+}
+
+model PharmacyChain {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(255)
+  ownerName   String?  @map("owner_name") @db.VarChar(255)
+  ownerPhone  String?  @map("owner_phone") @db.VarChar(50)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenants     Tenant[]
+  transfers   StockTransfer[]
+
+  @@map("pharmacy_chains")
+}
+
+model StockTransfer {
+  id                 String    @id @default(uuid()) @db.Uuid
+  transferNumber     String    @unique @map("transfer_number") @db.VarChar(100)
+  chainId            String    @map("chain_id") @db.Uuid
+  sourceTenantId     String    @map("source_tenant_id") @db.Uuid
+  targetTenantId     String    @map("target_tenant_id") @db.Uuid
+  sourcePharmacyName String    @map("source_pharmacy_name") @db.VarChar(255)
+  targetPharmacyName String    @map("target_pharmacy_name") @db.VarChar(255)
+  medicineId         String    @map("medicine_id") @db.Uuid
+  tradeName          String    @map("trade_name") @db.VarChar(255)
+  batchNumber        String?   @map("batch_number") @db.VarChar(100)
+  expiryDate         DateTime? @map("expiry_date")
+  quantityPacks      Int       @map("quantity_packs")
+  quantityUnits      Int       @map("quantity_units")
+  purchasePricePack  Decimal   @map("purchase_price_pack") @db.Decimal(12, 2)
+  status             String    @default("PENDING") @map("status") @db.VarChar(50)
+  notes              String?   @db.Text
+  senderUserName     String?   @map("sender_user_name") @db.VarChar(100)
+  receiverUserName   String?   @map("receiver_user_name") @db.VarChar(100)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  completedAt        DateTime? @map("completed_at")
+
+  chain              PharmacyChain @relation(fields: [chainId], references: [id], onDelete: Cascade)
+
+  @@index([chainId])
+  @@index([sourceTenantId])
+  @@index([targetTenantId])
+  @@map("stock_transfers")
 }
 
 model Medicine {

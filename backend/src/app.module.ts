@@ -15,6 +15,7 @@ import { BackupModule } from './modules/backup/backup.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { PurchasesModule } from './modules/purchases/purchases.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
+import { ChainModule } from './modules/chain/chain.module';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -32,6 +33,7 @@ import { AppService } from './app.service';
     InventoryModule,
     PurchasesModule,
     ExpensesModule,
+    ChainModule,
     SearchModule,
     PosModule,
     ReportsModule,

@@ -79,6 +79,41 @@ export class AuthService {
 
     const accessToken = this.jwtService.sign(payload);
 
+    // 5. Get Linked Branches for Owner
+    let branches: any[] = [
+      {
+        id: tenant.id,
+        name: tenant.name,
+        slug: tenant.slug,
+        governorate: tenant.governorate,
+        district: tenant.district,
+        phone: tenant.phone,
+        isCurrent: true,
+      },
+    ];
+
+    if (user.role === 'OWNER' && tenant.chainId) {
+      const memberTenants = await this.prisma.tenant.findMany({
+        where: {
+          chainId: tenant.chainId,
+          subscriptionStatus: { not: 'SUSPENDED' },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (memberTenants.length > 0) {
+        branches = memberTenants.map((t) => ({
+          id: t.id,
+          name: t.name,
+          slug: t.slug,
+          governorate: t.governorate,
+          district: t.district,
+          phone: t.phone,
+          isCurrent: t.id === tenant.id,
+        }));
+      }
+    }
+
     return {
       accessToken,
       user: {
@@ -97,6 +132,120 @@ export class AuthService {
         subscriptionStatus: currentStatus,
         subscriptionEndsAt: tenant.subscriptionEndsAt,
       },
+      branches,
+    };
+  }
+
+  async switchBranch(targetTenantId: string, currentTenantId: string, currentUserRole: string) {
+    if (currentUserRole !== 'OWNER') {
+      throw new ForbiddenException('فقط مالك الصيدلية يمتلك صلاحية التبديل بين الفروع');
+    }
+
+    const currentTenant = await this.prisma.tenant.findUnique({
+      where: { id: currentTenantId },
+    });
+
+    if (!currentTenant) {
+      throw new NotFoundException('الصيدلية الحالية غير موجودة');
+    }
+
+    const targetTenant = await this.prisma.tenant.findUnique({
+      where: { id: targetTenantId },
+    });
+
+    if (!targetTenant) {
+      throw new NotFoundException('الفرع المطلوب غير موجود');
+    }
+
+    if (targetTenant.subscriptionStatus === 'SUSPENDED') {
+      throw new ForbiddenException('حساب هذا الفرع موقف مؤقتاً');
+    }
+
+    // Verify both belong to the same chain
+    if (
+      !currentTenant.chainId ||
+      !targetTenant.chainId ||
+      currentTenant.chainId !== targetTenant.chainId
+    ) {
+      throw new ForbiddenException('الفرع المطلوب ليس مسجلاً ضمن سلسلة فروعك');
+    }
+
+    // Fetch owner user in target tenant schema
+    const targetUsers: any[] = await this.prisma.$queryRawUnsafe(`
+      SELECT id, name, username, role, is_active FROM "${targetTenant.schemaName}".users WHERE role = 'OWNER' LIMIT 1;
+    `);
+
+    const ownerUser = targetUsers[0] || {
+      id: 'owner-switch',
+      name: targetTenant.name,
+      username: 'owner',
+      role: 'OWNER',
+    };
+
+    // Check target subscription status
+    const now = new Date();
+    let currentStatus = targetTenant.subscriptionStatus;
+    if (targetTenant.subscriptionEndsAt < now && targetTenant.subscriptionStatus === 'ACTIVE') {
+      currentStatus = 'EXPIRED';
+      await this.prisma.tenant.update({
+        where: { id: targetTenant.id },
+        data: { subscriptionStatus: 'EXPIRED' },
+      });
+    }
+
+    // Generate new JWT
+    const payload = {
+      sub: ownerUser.id,
+      name: ownerUser.name,
+      username: ownerUser.username,
+      role: 'OWNER',
+      tenantId: targetTenant.id,
+      schemaName: targetTenant.schemaName,
+      subscriptionStatus: currentStatus,
+    };
+
+    const accessToken = this.jwtService.sign(payload);
+
+    // Get all branches in the chain
+    const memberTenants = await this.prisma.tenant.findMany({
+      where: {
+        chainId: targetTenant.chainId,
+        subscriptionStatus: { not: 'SUSPENDED' },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const branches = memberTenants.map((t) => ({
+      id: t.id,
+      name: t.name,
+      slug: t.slug,
+      governorate: t.governorate,
+      district: t.district,
+      phone: t.phone,
+      isCurrent: t.id === targetTenant.id,
+    }));
+
+    return {
+      success: true,
+      message: `تم التبديل بنجاح إلى فرع (${targetTenant.name})`,
+      accessToken,
+      user: {
+        id: ownerUser.id,
+        name: ownerUser.name,
+        username: ownerUser.username,
+        role: 'OWNER',
+      },
+      pharmacy: {
+        id: targetTenant.id,
+        name: targetTenant.name,
+        slug: targetTenant.slug,
+        governorate: targetTenant.governorate,
+        district: targetTenant.district,
+        phone: targetTenant.phone,
+        subscriptionStatus: currentStatus,
+        subscriptionEndsAt: targetTenant.subscriptionEndsAt,
+      },
+      branches,
     };
   }
 

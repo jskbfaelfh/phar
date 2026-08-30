@@ -15,4 +15,9 @@ export class SearchController {
   async getLocations() {
     return this.searchService.getAvailableLocations();
   }
+
+  @Get('stats')
+  async getStats() {
+    return this.searchService.getPublicNetworkStats();
+  }
 }

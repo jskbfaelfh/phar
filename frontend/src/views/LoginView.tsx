@@ -7,10 +7,10 @@ import {
   AlertCircle,
   Pill,
 } from 'lucide-react';
-import { apiRequest, setAuthToken } from '../api/client';
+import { apiRequest, setAuthToken, setStoredBranches } from '../api/client';
 
 interface LoginViewProps {
-  onLoginSuccess: (user: any, pharmacy?: any) => void;
+  onLoginSuccess: (user: any, pharmacy?: any, branches?: any[]) => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
@@ -40,8 +40,11 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       setAuthToken(data.accessToken);
       localStorage.setItem('dawaee_user', JSON.stringify(data.user));
       localStorage.setItem('dawaee_pharmacy', JSON.stringify(data.pharmacy));
+      if (data.branches) {
+        setStoredBranches(data.branches);
+      }
 
-      onLoginSuccess(data.user, data.pharmacy);
+      onLoginSuccess(data.user, data.pharmacy, data.branches);
     } catch (err: any) {
       setError(err.message || 'فشل تسجيل الدخول، يرجى التأكد من البيانات');
     } finally {

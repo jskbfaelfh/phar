@@ -28,6 +28,15 @@ export function getStoredPharmacy(): any | null {
   return p ? JSON.parse(p) : null;
 }
 
+export function getStoredBranches(): any[] {
+  const b = localStorage.getItem('dawaee_branches');
+  return b ? JSON.parse(b) : [];
+}
+
+export function setStoredBranches(branches: any[]) {
+  localStorage.setItem('dawaee_branches', JSON.stringify(branches));
+}
+
 export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},

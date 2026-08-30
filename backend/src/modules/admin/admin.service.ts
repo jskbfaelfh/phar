@@ -8,6 +8,10 @@ import {
   UpdateSubscriptionDto,
   UpdateStatusDto,
   ResetPasswordDto,
+  AddBranchDto,
+  LinkTenantsDto,
+  BulkChainOnboardingDto,
+  MergeChainsDto,
 } from './dto/create-tenant.dto';
 
 @Injectable()
@@ -24,6 +28,252 @@ export class AdminService {
    */
   async createTenant(dto: CreateTenantDto) {
     return this.provisioningService.provisionPharmacy(dto);
+  }
+
+  /**
+   * Bulk Onboard a Multi-Branch Chain in 1 Step
+   */
+  async onboardBulkChain(dto: BulkChainOnboardingDto) {
+    if (!dto.branches || dto.branches.length === 0) {
+      throw new Error('يجب تحديد فرع واحد على الأقل للسلسلة');
+    }
+
+    // 1. Create the PharmacyChain master record
+    const chain = await this.prisma.pharmacyChain.create({
+      data: {
+        name: dto.chainName,
+        ownerName: dto.ownerName,
+        ownerPhone: dto.ownerPhone || '',
+      },
+    });
+
+    // 2. Identify HQ index (if none specified, first branch is HQ)
+    let hqFound = false;
+    const branchesResults: any[] = [];
+
+    for (let i = 0; i < dto.branches.length; i++) {
+      const b = dto.branches[i];
+      let isHQ = b.isHQ;
+      if (isHQ && !hqFound) {
+        hqFound = true;
+      } else if (!hqFound && i === 0) {
+        isHQ = true;
+        hqFound = true;
+      } else {
+        isHQ = false;
+      }
+
+      const branchSlug = b.slug || `${dto.ownerUsername}_b${i + 1}`;
+
+      const tenantDto: CreateTenantDto = {
+        name: b.name,
+        slug: branchSlug,
+        governorate: b.governorate,
+        district: b.district,
+        addressDetails: b.addressDetails,
+        phone: b.phone || dto.ownerPhone,
+        subscriptionMonths: b.subscriptionMonths,
+        ownerName: dto.ownerName,
+        ownerUsername: i === 0 ? dto.ownerUsername : `${dto.ownerUsername}_b${i + 1}`,
+        ownerPassword: dto.ownerPassword,
+        cashierCount: b.cashierCount !== undefined ? b.cashierCount : 1,
+        cashierPassword: b.cashierPassword || '123456',
+        chainId: chain.id,
+        chainRole: isHQ ? 'HQ' : 'BRANCH',
+      };
+
+      const result = await this.provisioningService.provisionPharmacy(tenantDto);
+      branchesResults.push({
+        ...result,
+        isHQ,
+      });
+    }
+
+    return {
+      chain,
+      ownerCredentials: {
+        name: dto.ownerName,
+        username: dto.ownerUsername,
+        password: dto.ownerPassword,
+        phone: dto.ownerPhone,
+      },
+      branches: branchesResults,
+      message: `تم إنشاء السلسلة (${dto.chainName}) وتجهيز ${branchesResults.length} فروع بنجاح!`,
+    };
+  }
+
+  /**
+   * Merge Multiple Existing Pharmacies into a Chain
+   */
+  async mergeExistingIntoChain(dto: MergeChainsDto) {
+    const hqTenant = await this.prisma.tenant.findUnique({
+      where: { id: dto.hqTenantId },
+    });
+
+    if (!hqTenant) {
+      throw new NotFoundException('الصيدلية الرئيسية المحددة غير موجودة');
+    }
+
+    // Create PharmacyChain
+    const chain = await this.prisma.pharmacyChain.create({
+      data: {
+        name: dto.chainName,
+        ownerName: hqTenant.name,
+        ownerPhone: hqTenant.phone,
+      },
+    });
+
+    // Update HQ Tenant
+    await this.prisma.tenant.update({
+      where: { id: hqTenant.id },
+      data: {
+        chainId: chain.id,
+        chainRole: 'HQ',
+      },
+    });
+
+    // Update Branch Tenants
+    const branchIds = dto.branchTenantIds.filter((id) => id !== dto.hqTenantId);
+    for (const bId of branchIds) {
+      await this.prisma.tenant.update({
+        where: { id: bId },
+        data: {
+          chainId: chain.id,
+          chainRole: 'BRANCH',
+        },
+      });
+    }
+
+    return {
+      success: true,
+      message: `تم دمج ${branchIds.length + 1} صيدليات في سلسلة (${dto.chainName}) بنجاح!`,
+      chain,
+    };
+  }
+
+  /**
+   * Add a secondary branch to an existing pharmacy tenant
+   */
+  async addBranchToTenant(parentTenantId: string, dto: AddBranchDto) {
+    const parentTenant = await this.getTenantById(parentTenantId);
+
+    // 1. Ensure or create a PharmacyChain for the parent
+    let chainId = parentTenant.chainId;
+
+    if (!chainId) {
+      const newChain = await this.prisma.pharmacyChain.create({
+        data: {
+          name: `مجموعة ${parentTenant.name}`,
+          ownerName: parentTenant.name,
+          ownerPhone: parentTenant.phone,
+        },
+      });
+      chainId = newChain.id;
+
+      // Set parent as HQ
+      await this.prisma.tenant.update({
+        where: { id: parentTenant.id },
+        data: {
+          chainId: newChain.id,
+          chainRole: 'HQ',
+        },
+      });
+    }
+
+    // 2. Fetch parent owner user info if not explicitly provided
+    let ownerName = dto.ownerName;
+    let ownerUsername = dto.ownerUsername;
+    let ownerPassword = dto.ownerPassword;
+
+    if (!ownerUsername || !ownerPassword) {
+      try {
+        const ownerUsers: any[] = await this.prisma.$queryRawUnsafe(`
+          SELECT name, username FROM "${parentTenant.schemaName}".users WHERE role = 'OWNER' LIMIT 1;
+        `);
+        if (ownerUsers.length > 0) {
+          ownerName = ownerName || ownerUsers[0].name;
+          ownerUsername = ownerUsername || `${ownerUsers[0].username}_${dto.slug || Date.now().toString().slice(-4)}`;
+        }
+      } catch (e) {
+        this.logger.warn(`Could not fetch parent owner info: ${e.message}`);
+      }
+    }
+
+    ownerName = ownerName || parentTenant.name;
+    ownerUsername = ownerUsername || `owner_${dto.slug || Date.now().toString().slice(-4)}`;
+    ownerPassword = ownerPassword || '123456';
+
+    // 3. Provision new tenant as a BRANCH of this chain
+    const createDto: CreateTenantDto = {
+      name: dto.name,
+      slug: dto.slug,
+      governorate: dto.governorate,
+      district: dto.district,
+      addressDetails: dto.addressDetails,
+      phone: dto.phone || parentTenant.phone,
+      subscriptionMonths: dto.subscriptionMonths,
+      ownerName,
+      ownerUsername,
+      ownerPassword,
+      cashierCount: dto.cashierCount !== undefined ? dto.cashierCount : 1,
+      cashierPassword: dto.cashierPassword,
+      chainId,
+      chainRole: 'BRANCH',
+    };
+
+    return this.provisioningService.provisionPharmacy(createDto);
+  }
+
+  /**
+   * Link multiple existing pharmacies into a single chain
+   */
+  async linkTenantsIntoChain(dto: LinkTenantsDto) {
+    if (!dto.tenantIds || dto.tenantIds.length < 2) {
+      throw new Error('يجب تحديد صيدليتين على الأقل لربطهما في سلسلة');
+    }
+
+    const firstTenant = await this.prisma.tenant.findUnique({
+      where: { id: dto.tenantIds[0] },
+    });
+
+    if (!firstTenant) {
+      throw new NotFoundException('الصيدلية الرئيسية غير موجودة');
+    }
+
+    // Create Chain
+    const chain = await this.prisma.pharmacyChain.create({
+      data: {
+        name: dto.chainName,
+        ownerName: firstTenant.name,
+        ownerPhone: firstTenant.phone,
+      },
+    });
+
+    // Update first tenant as HQ
+    await this.prisma.tenant.update({
+      where: { id: firstTenant.id },
+      data: {
+        chainId: chain.id,
+        chainRole: 'HQ',
+      },
+    });
+
+    // Update remaining tenants as BRANCH
+    for (let i = 1; i < dto.tenantIds.length; i++) {
+      await this.prisma.tenant.update({
+        where: { id: dto.tenantIds[i] },
+        data: {
+          chainId: chain.id,
+          chainRole: 'BRANCH',
+        },
+      });
+    }
+
+    return {
+      success: true,
+      message: `تم ربط ${dto.tenantIds.length} صيدليات بنجاح في (${dto.chainName})`,
+      chain,
+    };
   }
 
   /**
@@ -50,6 +300,7 @@ export class AdminService {
       where,
       orderBy: { createdAt: 'desc' },
       include: {
+        chain: true,
         _count: {
           select: { searchIndexes: true },
         },

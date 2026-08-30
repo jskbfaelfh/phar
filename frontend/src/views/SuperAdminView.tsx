@@ -74,7 +74,85 @@ export const SuperAdminView: React.FC = () => {
   const [resetNewPassword, setResetNewPassword] = useState('');
   const [resetSuccessModal, setResetSuccessModal] = useState<any | null>(null);
 
-  // Add Form State
+  // Add Branch to Existing Tenant Modal State
+  const [showAddBranchModal, setShowAddBranchModal] = useState(false);
+  const [parentTenantForBranch, setParentTenantForBranch] = useState<any | null>(null);
+  const [isAddBranchCustomDistrict, setIsAddBranchCustomDistrict] = useState(false);
+  const [addBranchForm, setAddBranchForm] = useState({
+    name: '',
+    slug: '',
+    governorate: 'بغداد',
+    district: 'المنصور',
+    customDistrict: '',
+    addressDetails: '',
+    phone: '',
+    subscriptionMonths: 12,
+    cashierCount: 1,
+    ownerPassword: '',
+    cashierPassword: '',
+  });
+
+  // Bulk Multi-Branch Chain Onboarding Wizard State
+  const [showBulkChainModal, setShowBulkChainModal] = useState(false);
+  const [bulkChainResult, setBulkChainResult] = useState<any | null>(null);
+  const [bulkChainForm, setBulkChainForm] = useState({
+    chainName: '',
+    ownerName: '',
+    ownerPhone: '',
+    ownerUsername: '',
+    ownerPassword: '',
+    branches: [
+      {
+        name: 'الفرع الرئيسي',
+        slug: '',
+        isHQ: true,
+        governorate: 'بغداد',
+        district: 'المنصور',
+        customDistrict: '',
+        isCustomDistrict: false,
+        addressDetails: '',
+        phone: '',
+        subscriptionMonths: 12,
+        cashierCount: 1,
+      },
+      {
+        name: 'الفرع الثاني',
+        slug: '',
+        isHQ: false,
+        governorate: 'بغداد',
+        district: 'الكرادة',
+        customDistrict: '',
+        isCustomDistrict: false,
+        addressDetails: '',
+        phone: '',
+        subscriptionMonths: 12,
+        cashierCount: 1,
+      },
+      {
+        name: 'الفرع الثالث',
+        slug: '',
+        isHQ: false,
+        governorate: 'بغداد',
+        district: 'الحارثية',
+        customDistrict: '',
+        isCustomDistrict: false,
+        addressDetails: '',
+        phone: '',
+        subscriptionMonths: 12,
+        cashierCount: 1,
+      },
+    ],
+  });
+
+  // Merge Existing Pharmacies into Chain State
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [mergeForm, setMergeForm] = useState({
+    chainName: '',
+    hqTenantId: '',
+    branchTenantIds: [] as string[],
+  });
+
+  // Add Form State (New Pharmacy / Chain)
   const [form, setForm] = useState({
     name: '',
     slug: '',
@@ -89,6 +167,9 @@ export const SuperAdminView: React.FC = () => {
     ownerUsername: '',
     ownerPassword: '',
     createCashier: true,
+    cashierCount: 1,
+    isChain: false,
+    chainName: '',
   });
 
   // Edit Form State
@@ -368,6 +449,9 @@ export const SuperAdminView: React.FC = () => {
         ownerUsername: form.ownerUsername,
         ownerPassword: form.ownerPassword,
         createCashier: form.createCashier,
+        cashierCount: Number(form.cashierCount || 1),
+        isChain: form.isChain,
+        chainName: form.chainName || undefined,
       };
 
       const result = await apiRequest<any>('/admin/tenants', {
@@ -380,6 +464,219 @@ export const SuperAdminView: React.FC = () => {
       fetchData();
     } catch (err: any) {
       alert(err.message || 'فشل إضافة الصيدلية');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openAddBranchModal = (parentTenant: any) => {
+    setParentTenantForBranch(parentTenant);
+    const govData = IRAQ_LOCATIONS.find((l) => l.name === parentTenant.governorate);
+    const defDist = govData?.districts[0] || 'المركز';
+
+    setAddBranchForm({
+      name: `${parentTenant.name} - فرع جديد`,
+      slug: `${parentTenant.slug}_branch_${Math.floor(10 + Math.random() * 90)}`,
+      governorate: parentTenant.governorate || 'بغداد',
+      district: defDist,
+      customDistrict: '',
+      addressDetails: '',
+      phone: parentTenant.phone || '',
+      subscriptionMonths: 12,
+      cashierCount: 1,
+      ownerPassword: '',
+      cashierPassword: '',
+    });
+    setIsAddBranchCustomDistrict(false);
+    setShowAddBranchModal(true);
+  };
+
+  const handleAddBranchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!parentTenantForBranch) return;
+
+    setLoading(true);
+    const finalDistrict = isAddBranchCustomDistrict
+      ? addBranchForm.customDistrict
+      : addBranchForm.district;
+
+    try {
+      const payload = {
+        name: addBranchForm.name,
+        slug: addBranchForm.slug || undefined,
+        governorate: addBranchForm.governorate,
+        district: finalDistrict,
+        addressDetails: addBranchForm.addressDetails || undefined,
+        phone: addBranchForm.phone || undefined,
+        subscriptionMonths: Number(addBranchForm.subscriptionMonths),
+        cashierCount: Number(addBranchForm.cashierCount || 1),
+        ownerPassword: addBranchForm.ownerPassword || undefined,
+        cashierPassword: addBranchForm.cashierPassword || undefined,
+      };
+
+      const result = await apiRequest<any>(`/admin/tenants/${parentTenantForBranch.id}/add-branch`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      setNewPharmacyResult(result);
+      setShowAddBranchModal(false);
+      setParentTenantForBranch(null);
+      fetchData();
+      setMessage({ type: 'success', text: `تم إنشاء وربط الفرع (${addBranchForm.name}) بنجاح!` });
+    } catch (err: any) {
+      alert(err.message || 'فشل إضافة الفرع التابع');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Bulk Multi-Branch Chain Handlers
+  const addBranchRowToBulk = () => {
+    const nextIdx = bulkChainForm.branches.length + 1;
+    setBulkChainForm({
+      ...bulkChainForm,
+      branches: [
+        ...bulkChainForm.branches,
+        {
+          name: `الفرع ${nextIdx}`,
+          slug: '',
+          isHQ: false,
+          governorate: 'بغداد',
+          district: 'المنصور',
+          customDistrict: '',
+          isCustomDistrict: false,
+          addressDetails: '',
+          phone: '',
+          subscriptionMonths: 12,
+          cashierCount: 1,
+        },
+      ],
+    });
+  };
+
+  const removeBranchRowFromBulk = (index: number) => {
+    if (bulkChainForm.branches.length <= 1) {
+      alert('يجب أن تحتوي السلسلة على فرع واحد على الأقل');
+      return;
+    }
+    const updated = bulkChainForm.branches.filter((_, i) => i !== index);
+    if (!updated.some((b) => b.isHQ) && updated.length > 0) {
+      updated[0].isHQ = true;
+    }
+    setBulkChainForm({ ...bulkChainForm, branches: updated });
+  };
+
+  const setHQBranchInBulk = (index: number) => {
+    const updated = bulkChainForm.branches.map((b, i) => ({
+      ...b,
+      isHQ: i === index,
+    }));
+    setBulkChainForm({ ...bulkChainForm, branches: updated });
+  };
+
+  const handleBulkChainSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const branchesPayload = bulkChainForm.branches.map((b) => {
+        const finalDistrict = b.isCustomDistrict ? b.customDistrict : b.district;
+        return {
+          name: b.name,
+          slug: b.slug || undefined,
+          isHQ: b.isHQ,
+          governorate: b.governorate,
+          district: finalDistrict,
+          addressDetails: b.addressDetails || undefined,
+          phone: b.phone || undefined,
+          subscriptionMonths: Number(b.subscriptionMonths),
+          cashierCount: Number(b.cashierCount || 1),
+        };
+      });
+
+      const payload = {
+        chainName: bulkChainForm.chainName,
+        ownerName: bulkChainForm.ownerName,
+        ownerPhone: bulkChainForm.ownerPhone || undefined,
+        ownerUsername: bulkChainForm.ownerUsername,
+        ownerPassword: bulkChainForm.ownerPassword,
+        branches: branchesPayload,
+      };
+
+      const result = await apiRequest<any>('/admin/chains/onboard-bulk', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      setBulkChainResult(result);
+      setShowBulkChainModal(false);
+      fetchData();
+      setMessage({ type: 'success', text: result.message || 'تم تأسيس السلسلة وكافة فروعها بنجاح!' });
+    } catch (err: any) {
+      alert(err.message || 'فشل تسجيل السلسلة والفروع');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copyBulkChainCredentials = () => {
+    if (!bulkChainResult) return;
+    const r = bulkChainResult;
+    let text = `👑 *بيانات اعتماد سلسلة (${r.chain.name})*\n\n` +
+      `🌐 رابط الدخول المركزي: http://localhost:3000\n` +
+      `👤 *حساب المالك الموحد:*\n` +
+      `- الاسم: ${r.ownerCredentials.name}\n` +
+      `- اسم المستخدم: ${r.ownerCredentials.username}\n` +
+      `- كلمة المرور: ${r.ownerCredentials.password}\n\n` +
+      `🏬 *فروع السلسلة المفعلة (${r.branches.length} فروع):*\n`;
+
+    r.branches.forEach((b: any, idx: number) => {
+      text += `\n${idx + 1}. [${b.isHQ ? '👑 رئيسي' : '🏢 فرع'}] ${b.tenant.name}\n` +
+        `   - المعرف (Slug): ${b.tenant.slug}\n` +
+        `   - مفتاح الترخيص: ${b.tenant.licenseKey}\n` +
+        `   - الموقع: ${b.tenant.governorate} - ${b.tenant.district}\n`;
+      if (b.cashierAccount) {
+        text += `   - حساب الكاشير: ${b.cashierAccount.username} | كلمة السر: ${b.cashierAccount.password}\n`;
+      }
+    });
+
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 3000);
+  };
+
+  // Merge Existing Pharmacies Handler
+  const handleMergeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mergeForm.hqTenantId) {
+      alert('يرجى تحديد الصيدلية الرئيسية (HQ)');
+      return;
+    }
+    if (mergeForm.branchTenantIds.length === 0) {
+      alert('يرجى تحديد فرع تابع واحد على الأقل لدمجه');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const payload = {
+        chainName: mergeForm.chainName || `مجموعة ${tenants.find((t) => t.id === mergeForm.hqTenantId)?.name}`,
+        hqTenantId: mergeForm.hqTenantId,
+        branchTenantIds: mergeForm.branchTenantIds,
+      };
+
+      const res = await apiRequest<any>('/admin/chains/merge-existing', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      setShowMergeModal(false);
+      setMergeForm({ chainName: '', hqTenantId: '', branchTenantIds: [] });
+      fetchData();
+      setMessage({ type: 'success', text: res.message || 'تم دمج الصيدليات بنجاح!' });
+    } catch (err: any) {
+      alert(err.message || 'فشل دمج الصيدليات');
     } finally {
       setLoading(false);
     }
@@ -596,13 +893,33 @@ export const SuperAdminView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all active:scale-95 cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          إضافة صيدلية جديدة
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setShowMergeModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 rounded-xl text-xs font-black shadow-2xs transition-all active:scale-95 cursor-pointer"
+            title="دمج صيدليات مسجلة مسبقاً وتعيين فرع رئيسي"
+          >
+            <Building2 className="w-4 h-4 text-purple-600" />
+            <span>🔗 دمج صيدليات في سلسلة</span>
+          </button>
+
+          <button
+            onClick={() => setShowBulkChainModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl text-xs font-black shadow-sm shadow-amber-500/20 transition-all active:scale-95 cursor-pointer"
+            title="تسجيل عميل يمتلك عدة صيدليات دفعة واحدة"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>👑 تسجيل سلسلة فروع موحدة (3+ فروع)</span>
+          </button>
+
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all active:scale-95 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>➕ صيدلية مفردة</span>
+          </button>
+        </div>
       </div>
 
       {message && (
@@ -701,10 +1018,21 @@ export const SuperAdminView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {tenants.map((t) => (
+                    {tenants.map((t) => (
                     <tr key={t.id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="p-3">
-                        <div className="font-bold text-slate-900 text-sm">{t.name}</div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-slate-900 text-sm">{t.name}</span>
+                          {t.chain && (
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                              t.chainRole === 'HQ'
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                            }`}>
+                              {t.chainRole === 'HQ' ? '👑 رئيسي' : '🏢 فرع'} ({t.chain.name})
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-slate-400 font-mono">slug: {t.slug} • schema: {t.schemaName}</div>
                       </td>
                       <td className="p-3 text-slate-600">
@@ -744,7 +1072,16 @@ export const SuperAdminView: React.FC = () => {
                         {t.subscriptionEndsAt ? new Date(t.subscriptionEndsAt).toLocaleDateString('ar-IQ') : '—'}
                       </td>
                       <td className="p-3">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-center gap-2 flex-wrap">
+                          <button
+                            onClick={() => openAddBranchModal(t)}
+                            className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-black flex items-center gap-1 cursor-pointer transition-colors shadow-2xs active:scale-95"
+                            title="إضافة فرع تابع لهذه الصيدلية بالسلسلة"
+                          >
+                            <Building2 className="w-3.5 h-3.5 text-emerald-600" />
+                            + فرع تابع
+                          </button>
+
                           <button
                             onClick={() => openAccountsModal(t)}
                             className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
@@ -1584,19 +1921,58 @@ export const SuperAdminView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Option to auto-create Cashier Account */}
-              <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
-                <input
-                  type="checkbox"
-                  id="createCashier"
-                  checked={form.createCashier}
-                  onChange={(e) => setForm({ ...form, createCashier: e.target.checked })}
-                  className="w-4 h-4 text-indigo-600 rounded cursor-pointer"
-                />
-                <label htmlFor="createCashier" className="text-xs font-bold text-slate-800 cursor-pointer flex items-center gap-1.5">
+              {/* Multi-Branch Chain Option */}
+              <div className="p-4 bg-purple-50/60 rounded-2xl border border-purple-200/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="isChain" className="text-xs font-black text-purple-950 flex items-center gap-2 cursor-pointer">
+                    <Building2 className="w-4 h-4 text-purple-600" />
+                    <span>تأسيس صيدلية رئيسية لسلسلة فروع (Multi-Branch Chain HQ)</span>
+                  </label>
+                  <input
+                    type="checkbox"
+                    id="isChain"
+                    checked={form.isChain}
+                    onChange={(e) => setForm({ ...form, isChain: e.target.checked })}
+                    className="w-4 h-4 text-purple-600 rounded cursor-pointer"
+                  />
+                </div>
+
+                {form.isChain && (
+                  <div>
+                    <label className="block text-[11px] font-bold text-purple-900 mb-1">اسم السلسلة الموحدة *</label>
+                    <input
+                      type="text"
+                      required={form.isChain}
+                      value={form.chainName}
+                      onChange={(e) => setForm({ ...form, chainName: e.target.value })}
+                      placeholder="مثال: مجموعة صيدليات النور"
+                      className="w-full px-3 py-2 bg-white border border-purple-300 rounded-xl text-xs font-bold text-slate-900"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Cashier Accounts Count Option */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
                   <UserCheck className="w-4 h-4 text-slate-500" />
-                  إنشاء حساب كاشير إضافي تلقائياً (بنفس كلمة المرور لسرعة بدء العمل)
-                </label>
+                  <div>
+                    <div className="text-xs font-bold text-slate-800">عدد حسابات الكاشير الأولية:</div>
+                    <div className="text-[10px] text-slate-400">سيتم إنشاء حسابات جاهزة (_pos1, _pos2...)</div>
+                  </div>
+                </div>
+
+                <select
+                  value={form.cashierCount}
+                  onChange={(e) => setForm({ ...form, cashierCount: Number(e.target.value) })}
+                  className="px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800"
+                >
+                  <option value={1}>1 كاشير (افتراضي)</option>
+                  <option value={2}>2 كاشير</option>
+                  <option value={3}>3 كاشيرات</option>
+                  <option value={4}>4 كاشيرات</option>
+                  <option value={5}>5 كاشيرات</option>
+                </select>
               </div>
 
               {/* Submit & Cancel */}
@@ -1611,6 +1987,202 @@ export const SuperAdminView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
+                  className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Branch to Existing Pharmacy Modal */}
+      {showAddBranchModal && parentTenantForBranch && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl p-6 max-w-xl w-full shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="font-black text-slate-900 text-lg flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-emerald-600" />
+                  إضافة فرع تابع لـ ({parentTenantForBranch.name})
+                </h3>
+                <div className="text-xs text-slate-400 font-mono mt-0.5">
+                  سيتم ربط الفرع الجديد تلقائياً بنفس حساب المالك وسلسلة الفروع
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAddBranchModal(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddBranchSubmit} className="mt-4 space-y-4">
+              {/* Branch Name & Slug */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">اسم الفرع الجديد *</label>
+                  <input
+                    type="text"
+                    required
+                    value={addBranchForm.name}
+                    onChange={(e) => setAddBranchForm({ ...addBranchForm, name: e.target.value })}
+                    placeholder="مثال: صيدلية النور - فرع المنصور"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">المعرف (Slug) *</label>
+                  <input
+                    type="text"
+                    required
+                    value={addBranchForm.slug}
+                    onChange={(e) => setAddBranchForm({ ...addBranchForm, slug: e.target.value })}
+                    placeholder="pharmacy_alnoor_mansour"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Governorate & District */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-50/70 p-3.5 rounded-2xl border border-slate-200">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">المحافظة *</label>
+                  <select
+                    value={addBranchForm.governorate}
+                    onChange={(e) => {
+                      const newGov = e.target.value;
+                      const gData = IRAQ_LOCATIONS.find((l) => l.name === newGov);
+                      setAddBranchForm({
+                        ...addBranchForm,
+                        governorate: newGov,
+                        district: gData?.districts[0] || 'المركز',
+                      });
+                      setIsAddBranchCustomDistrict(false);
+                    }}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-800"
+                  >
+                    {IRAQ_LOCATIONS.map((gov) => (
+                      <option key={gov.name} value={gov.name}>
+                        {gov.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">المنطقة / الحي *</label>
+                  {isAddBranchCustomDistrict ? (
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        required
+                        value={addBranchForm.customDistrict}
+                        onChange={(e) => setAddBranchForm({ ...addBranchForm, customDistrict: e.target.value })}
+                        placeholder="اكتب اسم المنطقة..."
+                        className="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIsAddBranchCustomDistrict(false)}
+                        className="px-2.5 py-2 bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        القائمة
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={addBranchForm.district}
+                      onChange={(e) => {
+                        if (e.target.value === 'CUSTOM') {
+                          setIsAddBranchCustomDistrict(true);
+                          setAddBranchForm({ ...addBranchForm, customDistrict: '' });
+                        } else {
+                          setAddBranchForm({ ...addBranchForm, district: e.target.value });
+                        }
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-800"
+                    >
+                      {(IRAQ_LOCATIONS.find((l) => l.name === addBranchForm.governorate)?.districts || []).map((dist) => (
+                        <option key={dist} value={dist}>
+                          {dist}
+                        </option>
+                      ))}
+                      <option value="CUSTOM">➕ منطقة أخرى (كتابة يدوية)</option>
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              {/* Address & Phone */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">العنوان التفصيلي (اختياري)</label>
+                  <input
+                    type="text"
+                    value={addBranchForm.addressDetails}
+                    onChange={(e) => setAddBranchForm({ ...addBranchForm, addressDetails: e.target.value })}
+                    placeholder="شارع 14 رمضان..."
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">هاتف الفرع (اختياري)</label>
+                  <input
+                    type="text"
+                    value={addBranchForm.phone}
+                    onChange={(e) => setAddBranchForm({ ...addBranchForm, phone: e.target.value })}
+                    placeholder="07701234567"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Subscription & Cashiers Count */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-emerald-50/50 p-3.5 rounded-2xl border border-emerald-100">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">مدة اشتراك الفرع *</label>
+                  <select
+                    value={addBranchForm.subscriptionMonths}
+                    onChange={(e) => setAddBranchForm({ ...addBranchForm, subscriptionMonths: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-800"
+                  >
+                    <option value={1}>🟡 تجريبي (شهر واحد)</option>
+                    <option value={6}>🔵 نصف سنوي (6 أشهر)</option>
+                    <option value={12}>🟢 سنة كاملة (12 شهراً)</option>
+                    <option value={24}>🟣 سنتان (24 شهراً)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">عدد حسابات الكاشير للفرع *</label>
+                  <select
+                    value={addBranchForm.cashierCount}
+                    onChange={(e) => setAddBranchForm({ ...addBranchForm, cashierCount: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm font-bold text-slate-800"
+                  >
+                    <option value={1}>1 كاشير</option>
+                    <option value={2}>2 كاشير</option>
+                    <option value={3}>3 كاشيرات</option>
+                    <option value={5}>5 كاشيرات</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Submit & Cancel */}
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-md transition-all active:scale-95 cursor-pointer"
+                >
+                  {loading ? 'جاري تجهيز الفرع وقاعدة البيانات...' : '🏢 تأكيد إنشاء وتفعيل الفرع التابع'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddBranchModal(false)}
                   className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
                 >
                   إلغاء
@@ -1856,6 +2428,582 @@ export const SuperAdminView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowMasterR2Modal(false)}
+                  className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Multi-Branch Chain Onboarding Wizard Modal */}
+      {showBulkChainModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 max-w-3xl w-full shadow-2xl border border-amber-200 max-h-[92vh] overflow-y-auto space-y-5">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="font-black text-slate-900 text-lg flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-amber-500" />
+                  تسجيل سلسلة صيدليات جديدة (Multi-Branch Wizard)
+                </h3>
+                <p className="text-xs text-slate-500 font-bold mt-0.5">
+                  إدخال بيانات المالك الموحدة وتجهيز كافة الفروع وقواعد بياناتها في عملية واحدة.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowBulkChainModal(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleBulkChainSubmit} className="space-y-6">
+              {/* 1. Master Chain & Owner Credentials */}
+              <div className="p-4 bg-gradient-to-br from-amber-50 to-orange-50/50 rounded-2xl border border-amber-200/80 space-y-3">
+                <div className="text-xs font-black text-amber-950 flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-amber-600" />
+                  <span>1. بيانات السلسلة والمالك الموحدة:</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="md:col-span-1">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">اسم السلسلة الموحدة *</label>
+                    <input
+                      type="text"
+                      required
+                      value={bulkChainForm.chainName}
+                      onChange={(e) => setBulkChainForm({ ...bulkChainForm, chainName: e.target.value })}
+                      placeholder="مثال: مجموعة صيدليات الشفاء"
+                      className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-bold text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">اسم صاحب الصيدليات (المالك) *</label>
+                    <input
+                      type="text"
+                      required
+                      value={bulkChainForm.ownerName}
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        const clean = arabicToEnglishSlug(name);
+                        setBulkChainForm({
+                          ...bulkChainForm,
+                          ownerName: name,
+                          ownerUsername: clean ? `${clean}_owner` : bulkChainForm.ownerUsername,
+                        });
+                      }}
+                      placeholder="مثال: د. مصطفى كمال"
+                      className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-bold text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">رقم هاتف المالك</label>
+                    <input
+                      type="text"
+                      value={bulkChainForm.ownerPhone}
+                      onChange={(e) => setBulkChainForm({ ...bulkChainForm, ownerPhone: e.target.value })}
+                      placeholder="07701234567"
+                      className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-bold text-slate-900"
+                    />
+                  </div>
+                </div>
+
+                {/* Login Credentials */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 border-t border-amber-200/50">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">اسم مستخدم المالك الموحد *</label>
+                    <input
+                      type="text"
+                      required
+                      value={bulkChainForm.ownerUsername}
+                      onChange={(e) => setBulkChainForm({ ...bulkChainForm, ownerUsername: e.target.value })}
+                      placeholder="mustafa_owner"
+                      className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-mono font-bold text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">كلمة مرور المالك *</label>
+                    <input
+                      type="text"
+                      required
+                      value={bulkChainForm.ownerPassword}
+                      onChange={(e) => setBulkChainForm({ ...bulkChainForm, ownerPassword: e.target.value })}
+                      placeholder="••••••••"
+                      className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-mono font-bold text-slate-900"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Dynamic Branches List */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-black text-slate-900 flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-indigo-600" />
+                    <span>2. فروع السلسلة ({bulkChainForm.branches.length} فروع):</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={addBranchRowToBulk}
+                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-black flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>إضافة فرع آخر</span>
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {bulkChainForm.branches.map((b, idx) => {
+                    const currentGovData = IRAQ_LOCATIONS.find((l) => l.name === b.governorate);
+                    const availableDistricts = currentGovData?.districts || [];
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`p-4 rounded-2xl border transition-all ${
+                          b.isHQ
+                            ? 'bg-amber-50/40 border-amber-300 ring-2 ring-amber-400/20'
+                            : 'bg-slate-50/80 border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        {/* Branch Title & HQ Radio */}
+                        <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-200/60 flex-wrap gap-2">
+                          <div className="flex items-center gap-3">
+                            <label className="flex items-center gap-1.5 cursor-pointer">
+                              <input
+                                type="radio"
+                                name="bulk_hq_selection"
+                                checked={b.isHQ}
+                                onChange={() => setHQBranchInBulk(idx)}
+                                className="w-4 h-4 text-amber-600 cursor-pointer"
+                              />
+                              <span
+                                className={`text-xs font-black ${
+                                  b.isHQ ? 'text-amber-900' : 'text-slate-600'
+                                }`}
+                              >
+                                {b.isHQ ? '👑 الفرع الرئيسي (HQ)' : '🏢 فرع تابع (Branch)'}
+                              </span>
+                            </label>
+                          </div>
+
+                          {bulkChainForm.branches.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeBranchRowFromBulk(idx)}
+                              className="text-[11px] text-rose-600 hover:text-rose-800 font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              حذف الفرع
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Fields Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5">
+                          <div className="md:col-span-2">
+                            <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                              اسم الفرع *
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={b.name}
+                              onChange={(e) => {
+                                const updated = [...bulkChainForm.branches];
+                                updated[idx].name = e.target.value;
+                                setBulkChainForm({ ...bulkChainForm, branches: updated });
+                              }}
+                              placeholder={`مثال: صيدلية الشفاء - ${b.isHQ ? 'فرع المنصور' : `الفرع ${idx + 1}`}`}
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                              المحافظة *
+                            </label>
+                            <select
+                              value={b.governorate}
+                              onChange={(e) => {
+                                const updated = [...bulkChainForm.branches];
+                                const newGov = e.target.value;
+                                const gData = IRAQ_LOCATIONS.find((l) => l.name === newGov);
+                                updated[idx].governorate = newGov;
+                                updated[idx].district = gData?.districts[0] || 'المركز';
+                                updated[idx].isCustomDistrict = false;
+                                setBulkChainForm({ ...bulkChainForm, branches: updated });
+                              }}
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900"
+                            >
+                              {IRAQ_LOCATIONS.map((gov) => (
+                                <option key={gov.name} value={gov.name}>
+                                  {gov.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                              المنطقة / الحي *
+                            </label>
+                            {b.isCustomDistrict ? (
+                              <div className="flex gap-1">
+                                <input
+                                  type="text"
+                                  required
+                                  value={b.customDistrict}
+                                  onChange={(e) => {
+                                    const updated = [...bulkChainForm.branches];
+                                    updated[idx].customDistrict = e.target.value;
+                                    setBulkChainForm({ ...bulkChainForm, branches: updated });
+                                  }}
+                                  placeholder="اكتب المنطقة..."
+                                  className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = [...bulkChainForm.branches];
+                                    updated[idx].isCustomDistrict = false;
+                                    setBulkChainForm({ ...bulkChainForm, branches: updated });
+                                  }}
+                                  className="px-2 py-1 bg-slate-200 text-slate-700 rounded-md text-[10px] font-bold cursor-pointer"
+                                >
+                                  قائمة
+                                </button>
+                              </div>
+                            ) : (
+                              <select
+                                value={b.district}
+                                onChange={(e) => {
+                                  const updated = [...bulkChainForm.branches];
+                                  if (e.target.value === 'CUSTOM') {
+                                    updated[idx].isCustomDistrict = true;
+                                    updated[idx].customDistrict = '';
+                                  } else {
+                                    updated[idx].district = e.target.value;
+                                  }
+                                  setBulkChainForm({ ...bulkChainForm, branches: updated });
+                                }}
+                                className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900"
+                              >
+                                {availableDistricts.map((dist) => (
+                                  <option key={dist} value={dist}>
+                                    {dist}
+                                  </option>
+                                ))}
+                                <option value="CUSTOM">➕ منطقة أخرى</option>
+                              </select>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Subscription & Cashier row */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 mt-2">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                              مدة الاشتراك
+                            </label>
+                            <select
+                              value={b.subscriptionMonths}
+                              onChange={(e) => {
+                                const updated = [...bulkChainForm.branches];
+                                updated[idx].subscriptionMonths = Number(e.target.value);
+                                setBulkChainForm({ ...bulkChainForm, branches: updated });
+                              }}
+                              className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold"
+                            >
+                              <option value={1}>شهر تجريبي</option>
+                              <option value={6}>6 أشهر</option>
+                              <option value={12}>12 شهراً (سنة)</option>
+                              <option value={24}>24 شهراً (سنتان)</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                              عدد الكاشيرات
+                            </label>
+                            <select
+                              value={b.cashierCount}
+                              onChange={(e) => {
+                                const updated = [...bulkChainForm.branches];
+                                updated[idx].cashierCount = Number(e.target.value);
+                                setBulkChainForm({ ...bulkChainForm, branches: updated });
+                              }}
+                              className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold"
+                            >
+                              <option value={1}>1 كاشير</option>
+                              <option value={2}>2 كاشير</option>
+                              <option value={3}>3 كاشيرات</option>
+                              <option value={5}>5 كاشيرات</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                              هاتف الفرع (اختياري)
+                            </label>
+                            <input
+                              type="text"
+                              value={b.phone}
+                              onChange={(e) => {
+                                const updated = [...bulkChainForm.branches];
+                                updated[idx].phone = e.target.value;
+                                setBulkChainForm({ ...bulkChainForm, branches: updated });
+                              }}
+                              placeholder="07701234567"
+                              className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Submit & Cancel */}
+              <div className="pt-3 flex gap-2">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl text-xs font-black shadow-md shadow-amber-500/20 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                >
+                  {loading
+                    ? 'جاري تأسيس السلسلة وقواعد بيانات الفروع...'
+                    : `👑 تأكيد تأسيس السلسلة وتجهيز كافة الفروع (${bulkChainForm.branches.length}) ⚡`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowBulkChainModal(false)}
+                  className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Chain Success Voucher Dialog */}
+      {bulkChainResult && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 max-w-2xl w-full shadow-2xl border border-amber-300 max-h-[92vh] overflow-y-auto space-y-4">
+            <div className="text-center">
+              <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-2">
+                <Sparkles className="w-7 h-7" />
+              </div>
+              <h3 className="text-lg font-black text-slate-900">
+                تم تأسيس سلسلة ({bulkChainResult.chain.name}) بنجاح! 👑
+              </h3>
+              <p className="text-xs text-slate-500 font-bold">
+                تم تجهيز {bulkChainResult.branches.length} قواعد بيانات مستقلة وتوليد التراخيص فوراً
+              </p>
+            </div>
+
+            {/* Master Credentials */}
+            <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-xs space-y-1.5">
+              <div className="font-black text-amber-950 flex items-center gap-1.5">
+                <KeyRound className="w-4 h-4 text-amber-600" />
+                <span>حساب المالك الموحد (يدخل به المالك للتبديل بين كافة الفروع):</span>
+              </div>
+              <div className="flex justify-between text-slate-700 font-mono pt-1">
+                <span>اسم المستخدم: <b>{bulkChainResult.ownerCredentials.username}</b></span>
+                <span>كلمة المرور: <b>{bulkChainResult.ownerCredentials.password}</b></span>
+              </div>
+            </div>
+
+            {/* Branches Vouchers */}
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              {bulkChainResult.branches.map((b: any, idx: number) => (
+                <div key={idx} className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs font-mono">
+                  <div className="flex items-center justify-between font-sans pb-1 mb-1 border-b border-slate-200">
+                    <span className="font-black text-slate-900">
+                      {b.isHQ ? '👑' : '🏢'} {b.tenant.name}
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-500">
+                      {b.tenant.governorate} — {b.tenant.district}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-600 text-[11px]">
+                    <span>معرف الصيدلية: <b className="text-indigo-700">{b.tenant.slug}</b></span>
+                    <span>الترخيص: <b className="text-slate-800">{b.tenant.licenseKey}</b></span>
+                  </div>
+                  {b.cashierAccount && (
+                    <div className="mt-1 text-[11px] text-blue-900 bg-white p-1.5 rounded border border-slate-200 flex justify-between font-sans">
+                      <span>حساب الكاشير: <b className="font-mono">{b.cashierAccount.username}</b></span>
+                      <span>كلمة السر: <b className="font-mono">{b.cashierAccount.password}</b></span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Actions */}
+            <div className="pt-2 flex gap-2">
+              <button
+                onClick={copyBulkChainCredentials}
+                className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all active:scale-95 cursor-pointer"
+              >
+                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                {copied ? 'تم نسخ بيانات كافة الفروع بنجاح!' : 'نسخ كافة بيانات السلسلة والفروع للعميل'}
+              </button>
+
+              <button
+                onClick={() => setBulkChainResult(null)}
+                className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge Existing Pharmacies Modal */}
+      {showMergeModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 max-w-xl w-full shadow-2xl border border-purple-200 max-h-[92vh] overflow-y-auto space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="font-black text-slate-900 text-lg flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-purple-600" />
+                  دمج صيدليات مسجلة مسبقاً في سلسلة موحدة
+                </h3>
+                <p className="text-xs text-slate-500 font-bold mt-0.5">
+                  توحيد صيدليات موجودة وتعيين واحدة منها كرئيسية لتمكين المالك من إدارتها سوية.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowMergeModal(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleMergeSubmit} className="space-y-4">
+              {/* Chain Name */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  اسم السلسلة الموحدة *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={mergeForm.chainName}
+                  onChange={(e) => setMergeForm({ ...mergeForm, chainName: e.target.value })}
+                  placeholder="مثال: مجموعة صيدليات النور الموحدة"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold text-slate-900"
+                />
+              </div>
+
+              {/* HQ Pharmacy Select */}
+              <div className="p-3.5 bg-amber-50/60 rounded-2xl border border-amber-200/80">
+                <label className="block text-xs font-black text-amber-950 mb-1.5 flex items-center gap-1.5">
+                  <span>👑 1. اختر الصيدلية الرئيسية (HQ) *</span>
+                </label>
+                <select
+                  required
+                  value={mergeForm.hqTenantId}
+                  onChange={(e) => {
+                    const newHq = e.target.value;
+                    setMergeForm({
+                      ...mergeForm,
+                      hqTenantId: newHq,
+                      branchTenantIds: mergeForm.branchTenantIds.filter((id) => id !== newHq),
+                    });
+                  }}
+                  className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-bold text-slate-900"
+                >
+                  <option value="">-- اختر الصيدلية الرئيسية --</option>
+                  {tenants.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.governorate} - {t.district}) {t.chain ? `[مربوطة بسلسلة: ${t.chain.name}]` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Sub Branches Multi-Select */}
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
+                <label className="block text-xs font-black text-slate-900 mb-2 flex items-center justify-between">
+                  <span>🏢 2. اختر الصيدليات التابعة التي ستنضم للسلسلة:</span>
+                  <span className="text-[11px] font-normal text-slate-500">
+                    محدد: ({mergeForm.branchTenantIds.length})
+                  </span>
+                </label>
+
+                <div className="max-h-48 overflow-y-auto space-y-1.5 border border-slate-200 rounded-xl p-2 bg-white divide-y divide-slate-100">
+                  {tenants
+                    .filter((t) => t.id !== mergeForm.hqTenantId)
+                    .map((t) => {
+                      const isChecked = mergeForm.branchTenantIds.includes(t.id);
+                      return (
+                        <label
+                          key={t.id}
+                          className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setMergeForm({
+                                    ...mergeForm,
+                                    branchTenantIds: [...mergeForm.branchTenantIds, t.id],
+                                  });
+                                } else {
+                                  setMergeForm({
+                                    ...mergeForm,
+                                    branchTenantIds: mergeForm.branchTenantIds.filter((id) => id !== t.id),
+                                  });
+                                }
+                              }}
+                              className="w-4 h-4 text-purple-600 rounded cursor-pointer"
+                            />
+                            <div>
+                              <div className="text-xs font-bold text-slate-900">{t.name}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">slug: {t.slug} • {t.governorate}</div>
+                            </div>
+                          </div>
+
+                          {t.chain && (
+                            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                              سلسلة: {t.chain.name}
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Submit & Cancel */}
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-black shadow-md shadow-purple-600/20 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                >
+                  {loading ? 'جاري دمج وتحديث السلسلة...' : '🔗 تأكيد دمج الصيدليات في السلسلة'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowMergeModal(false)}
                   className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
                 >
                   إلغاء

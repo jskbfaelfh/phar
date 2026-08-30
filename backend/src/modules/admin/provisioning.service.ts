@@ -51,27 +51,32 @@ export class ProvisioningService {
       passwordHash,
     );
 
-    // 4. Optionally create a standard default Cashier account
-    let cashierAccount: { username: string; password: string } | null = null;
-    if (dto.createCashier !== false) {
-      const cashierUsername = `${dto.ownerUsername}_pos`;
+    // 4. Create Cashier Accounts (Single or Multiple)
+    const cashierAccounts: { username: string; password: string; name: string }[] = [];
+    const count = dto.cashierCount !== undefined ? dto.cashierCount : (dto.createCashier !== false ? 1 : 0);
+
+    for (let i = 1; i <= count; i++) {
+      const suffix = count === 1 ? '_pos' : `_pos${i}`;
+      const cashierUsername = `${dto.ownerUsername}${suffix}`;
       const cashierPassword = dto.cashierPassword || '123456';
       const cashierHash = await bcrypt.hash(cashierPassword, saltRounds);
       const cashierUserId = crypto.randomUUID();
+      const cashierName = count === 1 ? `كاشير - ${dto.name}` : `كاشير ${i} - ${dto.name}`;
 
       await this.prisma.$executeRawUnsafe(
         `INSERT INTO "${schemaName}".users (id, name, username, password_hash, role, is_active, created_at)
          VALUES ($1::uuid, $2, $3, $4, 'CASHIER', TRUE, NOW())`,
         cashierUserId,
-        `كاشير - ${dto.name}`,
+        cashierName,
         cashierUsername,
         cashierHash,
       );
 
-      cashierAccount = {
+      cashierAccounts.push({
+        name: cashierName,
         username: cashierUsername,
         password: cashierPassword,
-      };
+      });
     }
 
     // 5. Calculate Subscription End Date
@@ -82,7 +87,23 @@ export class ProvisioningService {
     // 6. Generate License Key
     const licenseKey = `DAWAEE-${crypto.randomBytes(4).toString('hex').toUpperCase()}-${new Date().getFullYear()}`;
 
-    // 7. Register Tenant in Master Database
+    // 7. Handle PharmacyChain if requested
+    let chainId = dto.chainId || null;
+    let chainRole = dto.chainRole || 'BRANCH';
+
+    if (dto.isChain && !chainId) {
+      const newChain = await this.prisma.pharmacyChain.create({
+        data: {
+          name: dto.chainName || `مجموعة ${dto.name}`,
+          ownerName: dto.ownerName,
+          ownerPhone: dto.phone || '',
+        },
+      });
+      chainId = newChain.id;
+      chainRole = 'HQ';
+    }
+
+    // 8. Register Tenant in Master Database
     const tenant = await this.prisma.tenant.create({
       data: {
         name: dto.name,
@@ -98,6 +119,8 @@ export class ProvisioningService {
         licenseKey,
         subscriptionStatus: 'ACTIVE',
         subscriptionEndsAt: endsAt,
+        chainId,
+        chainRole,
       },
     });
 
@@ -112,7 +135,10 @@ export class ProvisioningService {
         password: dto.ownerPassword,
         role: 'OWNER',
       },
-      cashierAccount,
+      cashierAccounts,
+      cashierAccount: cashierAccounts[0] || null,
+      chainId,
+      chainRole,
     };
   }
 

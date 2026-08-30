@@ -25,4 +25,14 @@ export class AuthController {
   async getProfile(@CurrentUser() user: any) {
     return { user };
   }
+
+  @Post('switch-branch')
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.OK)
+  async switchBranch(
+    @CurrentUser() user: any,
+    @Body() body: { targetTenantId: string },
+  ) {
+    return this.authService.switchBranch(body.targetTenantId, user.tenantId, user.role);
+  }
 }

@@ -20,6 +20,7 @@ import {
   Lock,
   Mic,
   Sparkles,
+  Building2,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250 } from '../utils/currency';
@@ -255,6 +256,24 @@ export const PosView: React.FC = () => {
   // Smart Search & Voice AI state
   const [showSmartSearch, setShowSmartSearch] = useState(false);
   const [smartSearchAutoVoice, setSmartSearchAutoVoice] = useState(false);
+
+  // Cross-Branch Stock Check State
+  const [crossStockModalMed, setCrossStockModalMed] = useState<SearchMedicine | null>(null);
+  const [crossStockResults, setCrossStockResults] = useState<any[]>([]);
+  const [crossStockLoading, setCrossStockLoading] = useState<boolean>(false);
+
+  const handleCheckCrossStock = async (med: SearchMedicine) => {
+    setCrossStockModalMed(med);
+    setCrossStockLoading(true);
+    try {
+      const res = await apiRequest<any[]>(`/chain/cross-stock/${med.medicineId}`);
+      setCrossStockResults(res || []);
+    } catch {
+      setCrossStockResults([]);
+    } finally {
+      setCrossStockLoading(false);
+    }
+  };
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -826,6 +845,19 @@ export const PosView: React.FC = () => {
                               متوفر: {med.availablePacks} علبة و {med.availableStrips} شريط
                             </span>
                           )}
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCheckCrossStock(med);
+                            }}
+                            className="px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md text-[10px] font-black flex items-center gap-1 cursor-pointer transition-colors shadow-2xs active:scale-95"
+                            title="فحص توفر هذا الدواء في باقي فروع السلسلة"
+                          >
+                            <Building2 className="w-3 h-3 text-indigo-600" />
+                            <span>فحص بالفروع</span>
+                          </button>
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5 truncate">
                           {med.scientificName}
@@ -1485,6 +1517,108 @@ export const PosView: React.FC = () => {
             setTimeout(() => setMessage(null), 2500);
           }}
         />
+      )}
+
+      {/* Cross-Branch Stock Modal */}
+      {crossStockModalMed && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-sm">
+                    توفر الدواء في شبكة الفروع
+                  </h3>
+                  <div className="text-xs text-indigo-700 font-black">
+                    {crossStockModalMed.tradeName}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setCrossStockModalMed(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {crossStockLoading ? (
+              <div className="py-8 text-center text-xs font-bold text-slate-500 flex flex-col items-center gap-2">
+                <RefreshCw className="w-5 h-5 animate-spin text-indigo-600" />
+                <span>جاري فحص الأرصدة الحية في كافة الفروع...</span>
+              </div>
+            ) : crossStockResults.length === 0 ? (
+              <div className="py-8 text-center text-xs font-bold text-slate-400">
+                لا توجد فروع أخرى مربوطة حالياً ضمن السلسلة
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-72 overflow-y-auto">
+                {crossStockResults.map((br) => (
+                  <div
+                    key={br.tenantId}
+                    className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
+                      br.isCurrent
+                        ? 'bg-slate-50 border-slate-200 opacity-80'
+                        : br.isAvailable
+                        ? 'bg-emerald-50/70 border-emerald-200'
+                        : 'bg-rose-50/50 border-rose-100'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-black text-xs text-slate-900">{br.pharmacyName}</span>
+                        {br.isCurrent && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-slate-200 text-slate-700 rounded-md font-bold">
+                            الفرع الحالي
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-500 font-bold mt-0.5">
+                        {br.governorate} • {br.district} {br.phone && `• 📞 ${br.phone}`}
+                      </div>
+                      {br.shelfLocation && (
+                        <div className="text-[10px] text-amber-800 font-bold mt-0.5">
+                          📍 موقع الرف: {br.shelfLocation}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="text-left shrink-0">
+                      {br.isAvailable ? (
+                        <div className="text-emerald-800 font-black text-xs">
+                          <span className="font-mono text-sm">{br.availablePacks}</span> علبة{' '}
+                          {br.availableStrips > 0 && `و ${br.availableStrips} شريط`}
+                        </div>
+                      ) : (
+                        <div className="text-rose-600 font-bold text-xs">
+                          غير متوفر ❌
+                        </div>
+                      )}
+                      {br.sellingPricePack > 0 && (
+                        <div className="text-[10px] text-slate-500 font-mono font-bold">
+                          السعر: {br.sellingPricePack.toLocaleString()} د.ع
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={() => setCrossStockModalMed(null)}
+                className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-black cursor-pointer shadow-xs"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
