@@ -11,8 +11,11 @@ import {
   RefreshCw,
   Printer,
   Trash2,
+  Sparkles,
+  Camera,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
+import { SmartInvoiceScannerModal } from '../components/SmartInvoiceScannerModal';
 
 interface PurchaseInvoiceItem {
   id?: string;
@@ -51,6 +54,7 @@ export const PurchasesView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<PurchaseInvoice | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
+  const [showAiScanModal, setShowAiScanModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -256,11 +260,21 @@ export const PurchasesView: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowAiScanModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-900/20 active:scale-95 transition-all cursor-pointer"
+            title="تصوير وقراءة فاتورة المذخر الورقية بالذكاء الاصطناعي وترحيلها"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+            <Camera className="w-4 h-4" />
+            <span>تصوير ومسح بالذكاء الاصطناعي (AI OCR)</span>
+          </button>
+
+          <button
             onClick={() => setShowNewModal(true)}
             className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-xs active:scale-95 transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>تسجيل فاتورة شراء جديدة</span>
+            <span>إدخال يدوي</span>
           </button>
         </div>
       </div>
@@ -763,6 +777,21 @@ export const PurchasesView: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Smart AI OCR Invoice Scanner Modal */}
+      {showAiScanModal && (
+        <SmartInvoiceScannerModal
+          onClose={() => setShowAiScanModal(false)}
+          onSuccess={(savedInvoice) => {
+            setShowAiScanModal(false);
+            setMessage({
+              type: 'success',
+              text: `تم بنجاح قراءة واعتماد فاتورة المذخر (${savedInvoice.invoiceNumber || 'رقم جديد'}) وترحيل الأدوية للمخزن`,
+            });
+            fetchInvoices();
+          }}
+        />
       )}
     </div>
   );

@@ -3,16 +3,24 @@ import { Type } from 'class-transformer';
 
 export class PurchaseItemDto {
   @IsString()
-  @IsNotEmpty()
-  medicineId!: string;
+  @IsOptional()
+  medicineId?: string;
 
   @IsString()
-  @IsNotEmpty()
-  tradeName!: string;
+  @IsOptional()
+  tradeName?: string;
+
+  @IsString()
+  @IsOptional()
+  customTradeName?: string;
 
   @IsString()
   @IsOptional()
   scientificName?: string;
+
+  @IsString()
+  @IsOptional()
+  barcode?: string;
 
   @IsString()
   @IsOptional()
@@ -23,7 +31,7 @@ export class PurchaseItemDto {
   expiryDate!: string;
 
   @IsNumber()
-  @Min(1)
+  @Min(0.01)
   quantityPacks!: number;
 
   @IsNumber()

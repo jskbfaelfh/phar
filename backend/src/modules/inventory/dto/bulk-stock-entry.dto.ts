@@ -81,6 +81,10 @@ export class BulkStockItemDto {
   @Min(1)
   @IsOptional()
   minAlertUnits?: number;
+
+  @IsString()
+  @IsOptional()
+  shelfLocation?: string;
 }
 
 export class BulkStockEntryDto {
@@ -140,6 +144,10 @@ export class UpdateItemPriceDto {
   @Min(1)
   @IsOptional()
   minAlertUnits?: number;
+
+  @IsString()
+  @IsOptional()
+  shelfLocation?: string;
 }
 
 export class CreateSupplierDto {
@@ -198,4 +206,22 @@ export class RecordSupplierPaymentDto {
   @IsString()
   @IsOptional()
   notes?: string;
+}
+
+export class ReturnToSupplierDto {
+  @IsNumber()
+  @Min(1, { message: 'الكمية المرتجعة يجب أن تكون وحدة واحدة على الأقل' })
+  quantityUnits!: number;
+
+  @IsString()
+  @IsOptional()
+  reason?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  unitRefundPrice?: number;
+
+  @IsOptional()
+  deductFromSupplierDebt?: boolean;
 }

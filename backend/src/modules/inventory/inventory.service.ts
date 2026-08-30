@@ -15,6 +15,7 @@ import {
   CreateSupplierDto,
   UpdateSupplierDto,
   RecordSupplierPaymentDto,
+  ReturnToSupplierDto,
 } from './dto/bulk-stock-entry.dto';
 
 @Injectable()
@@ -98,6 +99,7 @@ export class InventoryService {
         );
         CREATE INDEX IF NOT EXISTS "idx_${schemaName}_supp_pay_dt" ON "${schemaName}".supplier_payments (created_at);
         ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS is_public_visible BOOLEAN DEFAULT TRUE;
+        ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS shelf_location VARCHAR(100);
       `;
 
       const statements = ddl
@@ -477,9 +479,10 @@ export class InventoryService {
     ]);
 
     return {
-      totalMedicines: totalRes[0]?.count || 0,
-      lowStockCount: lowStockRes[0]?.count || 0,
-      expiringSoonCount: expRes[0]?.count || 0,
+      totalMedicines: Number(totalRes[0]?.count || 0),
+      totalCount: Number(totalRes[0]?.count || 0),
+      lowStockCount: Number(lowStockRes[0]?.count || 0),
+      expiringSoonCount: Number(expRes[0]?.count || 0),
     };
   }
 
@@ -560,7 +563,7 @@ export class InventoryService {
 
       if (existingItems.length > 0) {
         inventoryItemId = existingItems[0].id;
-        // Update custom_name, selling prices and units per pack
+        // Update custom_name, selling prices, units per pack, and shelf_location
         await this.prisma.$executeRawUnsafe(
           `UPDATE "${schemaName}".inventory_items
            SET custom_name = COALESCE($1, custom_name),
@@ -568,21 +571,23 @@ export class InventoryService {
                selling_price_pack = $3,
                selling_price_unit = $4,
                min_alert_units = COALESCE($5, min_alert_units),
+               shelf_location = COALESCE($6, shelf_location),
                updated_at = NOW()
-           WHERE id = $6::uuid`,
+           WHERE id = $7::uuid`,
           item.customName || null,
           item.unitsPerPack,
           item.sellingPricePack,
           item.sellingPriceUnit,
           item.minAlertUnits || 5,
+          item.shelfLocation || null,
           inventoryItemId,
         );
       } else {
         inventoryItemId = crypto.randomUUID();
         await this.prisma.$executeRawUnsafe(
           `INSERT INTO "${schemaName}".inventory_items
-           (id, medicine_id, custom_name, units_per_pack, selling_price_pack, selling_price_unit, min_alert_units, created_at, updated_at)
-           VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, NOW(), NOW())`,
+           (id, medicine_id, custom_name, units_per_pack, selling_price_pack, selling_price_unit, min_alert_units, shelf_location, created_at, updated_at)
+           VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, NOW(), NOW())`,
           inventoryItemId,
           finalMedicineId,
           item.customName || null,
@@ -590,6 +595,7 @@ export class InventoryService {
           item.sellingPricePack,
           item.sellingPriceUnit,
           item.minAlertUnits || 5,
+          item.shelfLocation || null,
         );
       }
 
@@ -710,7 +716,7 @@ export class InventoryService {
   /**
    * Get all pharmacy inventory items with master info, custom alias name, and calculated stock
    */
-  async getPharmacyInventory(query?: { search?: string; supplierId?: string }) {
+  async getPharmacyInventory(query?: { search?: string; supplierId?: string; shelfLocation?: string }) {
     const schemaName = this.tenantContext.getSchemaName();
     await this.ensurePurchaseTablesExist(schemaName);
 
@@ -719,7 +725,12 @@ export class InventoryService {
 
     if (query?.search && query.search.trim().length > 0) {
       params.push(`%${query.search.trim()}%`);
-      searchFilter += ` AND (m.trade_name ILIKE $${params.length} OR m.scientific_name ILIKE $${params.length} OR m.barcode ILIKE $${params.length} OR i.custom_name ILIKE $${params.length})`;
+      searchFilter += ` AND (m.trade_name ILIKE $${params.length} OR m.scientific_name ILIKE $${params.length} OR m.barcode ILIKE $${params.length} OR i.custom_name ILIKE $${params.length} OR i.shelf_location ILIKE $${params.length})`;
+    }
+
+    if (query?.shelfLocation && query.shelfLocation.trim().length > 0) {
+      params.push(`%${query.shelfLocation.trim()}%`);
+      searchFilter += ` AND i.shelf_location ILIKE $${params.length}`;
     }
 
     if (query?.supplierId && query.supplierId.trim().length > 0) {
@@ -733,6 +744,7 @@ export class InventoryService {
         i.medicine_id as "medicineId",
         i.custom_name as "customName",
         i.units_per_pack as "unitsPerPack",
+        i.shelf_location as "shelfLocation",
         COALESCE(
           (SELECT b_sub.selling_price_pack 
            FROM "${schemaName}".inventory_batches b_sub 
@@ -898,10 +910,47 @@ export class InventoryService {
 
     const salesHistory: any[] = await this.prisma.$queryRawUnsafe(salesSql, batchIds);
 
+    // 3. Get Customer Returns on this medicine / batch
+    const returnsSql = `
+      SELECT 
+        r.id as "returnId",
+        r.quantity as "quantityReturned",
+        r.unit_type as "unitType",
+        r.refund_amount as "refundAmount",
+        r.reason as "reason",
+        r.created_at as "returnedAt",
+        u.name as "cashierName"
+      FROM "${schemaName}".returns r
+      LEFT JOIN "${schemaName}".users u ON r.user_id = u.id
+      WHERE r.inventory_item_id IN (
+        SELECT inventory_item_id FROM "${schemaName}".inventory_batches WHERE id = ANY($1::uuid[])
+      )
+      ORDER BY r.created_at DESC;
+    `;
+    const returnsHistory: any[] = await this.prisma.$queryRawUnsafe(returnsSql, batchIds);
+
+    // 4. Get Supplier Returns recorded on this batch
+    const suppReturnsSql = `
+      SELECT 
+        sp.id as "paymentId",
+        ABS(sp.amount) as "refundAmount",
+        sp.payment_date as "returnedAt",
+        sp.receipt_number as "receiptNumber",
+        sp.notes as "notes",
+        s.name as "supplierName"
+      FROM "${schemaName}".supplier_payments sp
+      LEFT JOIN "${schemaName}".suppliers s ON sp.supplier_id = s.id
+      WHERE sp.notes ILIKE $1
+      ORDER BY sp.payment_date DESC;
+    `;
+    const supplierReturnsHistory: any[] = await this.prisma.$queryRawUnsafe(suppReturnsSql, `%${cleanBatch}%`);
+
     return {
       found: true,
       batches,
       salesHistory,
+      returnsHistory,
+      supplierReturnsHistory,
     };
   }
 
@@ -953,12 +1002,14 @@ export class InventoryService {
            selling_price_pack = $2,
            selling_price_unit = $3,
            min_alert_units = COALESCE($4, min_alert_units),
+           shelf_location = $5,
            updated_at = NOW()
-       WHERE id = $5::uuid`,
+       WHERE id = $6::uuid`,
       dto.customName !== undefined ? dto.customName : null,
       dto.sellingPricePack,
       dto.sellingPriceUnit,
       dto.minAlertUnits || null,
+      dto.shelfLocation !== undefined ? dto.shelfLocation : null,
       inventoryItemId,
     );
 
@@ -1072,5 +1123,384 @@ export class InventoryService {
 
     const expiringBatches: any[] = await this.prisma.$queryRawUnsafe(sql, months);
     return expiringBatches;
+  }
+
+  /**
+   * Comprehensive Smart Expiry Analytics with Tier Breakdown & Financial Risk Assessment
+   */
+  async getSmartExpirySummary() {
+    const schemaName = this.tenantContext.getSchemaName();
+    await this.ensurePurchaseTablesExist(schemaName);
+
+    const sql = `
+      SELECT 
+        b.id as "batchId",
+        b.batch_number as "batchNumber",
+        b.purchase_price_pack as "purchasePricePack",
+        b.selling_price_pack as "sellingPricePack",
+        b.selling_price_unit as "sellingPriceUnit",
+        b.quantity_units_remaining as "quantityUnitsRemaining",
+        b.expiry_date as "expiryDate",
+        TO_CHAR(b.expiry_date, 'YYYY-MM-DD') as "expiryDateStr",
+        TO_CHAR(b.expiry_date, 'MM/YYYY') as "expiryFormatted",
+        (b.expiry_date - CURRENT_DATE)::int as "daysUntilExpiry",
+        b.is_recalled as "isRecalled",
+        i.id as "inventoryItemId",
+        i.units_per_pack as "unitsPerPack",
+        COALESCE(i.custom_name, m.trade_name) as "tradeName",
+        m.scientific_name as "scientificName",
+        m.dosage_form as "dosageForm",
+        m.strength as "strength",
+        m.barcode as "barcode",
+        s.id as "supplierId",
+        s.name as "supplierName",
+        s.phone as "supplierPhone",
+        p.invoice_number as "purchaseInvoiceNumber",
+        FLOOR(b.quantity_units_remaining / i.units_per_pack)::int as "packsRemaining",
+        (b.quantity_units_remaining % i.units_per_pack)::int as "stripsRemaining",
+        ROUND((b.quantity_units_remaining::numeric / NULLIF(i.units_per_pack, 0)) * COALESCE(b.purchase_price_pack, 0), 0) as "totalCostValue",
+        ROUND((b.quantity_units_remaining::numeric / NULLIF(i.units_per_pack, 0)) * COALESCE(i.selling_price_pack, 0), 0) as "totalSellingValue",
+        CASE 
+          WHEN b.expiry_date < CURRENT_DATE THEN 'EXPIRED'
+          WHEN b.expiry_date <= (CURRENT_DATE + interval '30 days') THEN 'DAYS_30'
+          WHEN b.expiry_date <= (CURRENT_DATE + interval '60 days') THEN 'DAYS_60'
+          WHEN b.expiry_date <= (CURRENT_DATE + interval '90 days') THEN 'DAYS_90'
+          WHEN b.expiry_date <= (CURRENT_DATE + interval '180 days') THEN 'DAYS_180'
+          ELSE 'SAFE'
+        END as "expiryTier"
+      FROM "${schemaName}".inventory_batches b
+      JOIN "${schemaName}".inventory_items i ON b.inventory_item_id = i.id
+      JOIN public.medicines m ON i.medicine_id = m.id
+      LEFT JOIN "${schemaName}".suppliers s ON b.supplier_id = s.id
+      LEFT JOIN "${schemaName}".purchases p ON b.purchase_id = p.id
+      WHERE b.quantity_units_remaining > 0
+        AND b.expiry_date <= (CURRENT_DATE + interval '180 days')
+      ORDER BY b.expiry_date ASC;
+    `;
+
+    const batches: any[] = await this.prisma.$queryRawUnsafe(sql);
+
+    // Calculate aggregated metrics by tier
+    const tiers: Record<string, { count: number; totalPacks: number; totalCost: number; totalSelling: number; label: string; badgeColor: string }> = {
+      EXPIRED: { count: 0, totalPacks: 0, totalCost: 0, totalSelling: 0, label: 'منتهي الصلاحية', badgeColor: 'rose' },
+      DAYS_30: { count: 0, totalPacks: 0, totalCost: 0, totalSelling: 0, label: 'أقل من 30 يوم', badgeColor: 'red' },
+      DAYS_60: { count: 0, totalPacks: 0, totalCost: 0, totalSelling: 0, label: '31 - 60 يوم', badgeColor: 'orange' },
+      DAYS_90: { count: 0, totalPacks: 0, totalCost: 0, totalSelling: 0, label: '61 - 90 يوم', badgeColor: 'amber' },
+      DAYS_180: { count: 0, totalPacks: 0, totalCost: 0, totalSelling: 0, label: '91 - 180 يوم', badgeColor: 'emerald' },
+    };
+
+    let totalAtRiskCost = 0;
+    let totalAtRiskSelling = 0;
+    const totalBatchesAtRisk = batches.length;
+
+    for (const b of batches) {
+      const tierKey = b.expiryTier;
+      if (tiers[tierKey]) {
+        tiers[tierKey].count += 1;
+        tiers[tierKey].totalPacks += Number(b.packsRemaining) || 0;
+        tiers[tierKey].totalCost += Number(b.totalCostValue) || 0;
+        tiers[tierKey].totalSelling += Number(b.totalSellingValue) || 0;
+      }
+      totalAtRiskCost += Number(b.totalCostValue) || 0;
+      totalAtRiskSelling += Number(b.totalSellingValue) || 0;
+    }
+
+    return {
+      summary: {
+        totalBatchesAtRisk,
+        totalAtRiskCost,
+        totalAtRiskSelling,
+        tiers,
+      },
+      batches,
+    };
+  }
+
+  /**
+   * Return near-expiry or defective batch to the supplier and deduct from debt
+   */
+  async returnBatchToSupplier(batchId: string, dto: ReturnToSupplierDto) {
+    const schemaName = this.tenantContext.getSchemaName();
+    await this.ensurePurchaseTablesExist(schemaName);
+
+    // 1. Fetch batch details
+    const batchRows: any[] = await this.prisma.$queryRawUnsafe(`
+      SELECT 
+        b.id,
+        b.batch_number as "batchNumber",
+        b.quantity_units_remaining as "quantityUnitsRemaining",
+        b.purchase_price_pack as "purchasePricePack",
+        b.supplier_id as "supplierId",
+        b.purchase_id as "purchaseId",
+        b.expiry_date as "expiryDate",
+        i.units_per_pack as "unitsPerPack",
+        COALESCE(i.custom_name, m.trade_name) as "tradeName",
+        s.name as "supplierName"
+      FROM "${schemaName}".inventory_batches b
+      JOIN "${schemaName}".inventory_items i ON b.inventory_item_id = i.id
+      JOIN public.medicines m ON i.medicine_id = m.id
+      LEFT JOIN "${schemaName}".suppliers s ON b.supplier_id = s.id
+      WHERE b.id = $1::uuid LIMIT 1;
+    `, batchId);
+
+    if (batchRows.length === 0) {
+      throw new NotFoundException('التشغيلة المحددة غير موجودة في المخزون');
+    }
+
+    const batch = batchRows[0];
+    const qtyToReturn = Number(dto.quantityUnits);
+
+    if (qtyToReturn > batch.quantityUnitsRemaining) {
+      throw new BadRequestException(`الكمية المراد إرجاعها (${qtyToReturn} وحدة) أكبر من المتوفر في الوجبة (${batch.quantityUnitsRemaining} وحدة)`);
+    }
+
+    const unitsPerPack = batch.unitsPerPack || 1;
+    const packsReturned = qtyToReturn / unitsPerPack;
+    const unitPrice = dto.unitRefundPrice !== undefined ? Number(dto.unitRefundPrice) : (batch.purchasePricePack / unitsPerPack);
+    const refundTotal = Math.round(qtyToReturn * unitPrice);
+
+    // 2. Deduct returned units from inventory batch
+    await this.prisma.$executeRawUnsafe(`
+      UPDATE "${schemaName}".inventory_batches
+      SET quantity_units_remaining = quantity_units_remaining - $1
+      WHERE id = $2::uuid;
+    `, qtyToReturn, batchId);
+
+    const voucherNumber = `RET-SUPP-${Date.now().toString().slice(-6)}`;
+    const reason = dto.reason || 'إرجاع دواء للمذخر بسبب قرب انتهاء الصلاحية';
+
+    // 3. Record supplier ledger adjustment if supplier exists
+    if (batch.supplierId) {
+      // Record payment deduction in supplier_payments
+      await this.prisma.$executeRawUnsafe(`
+        INSERT INTO "${schemaName}".supplier_payments (
+          id, supplier_id, purchase_id, amount, payment_date, payment_method, receipt_number, notes, created_at
+        ) VALUES (
+          gen_random_uuid(), $1::uuid, $2::uuid, $3, CURRENT_DATE, 'RETURN_CREDIT', $4, $5, NOW()
+        );
+      `,
+        batch.supplierId,
+        batch.purchaseId || null,
+        -refundTotal,
+        voucherNumber,
+        `سند إرجاع مواد للمذخر رقم ${voucherNumber} - دواء: ${batch.tradeName} (وجبة: ${batch.batchNumber}) - ${reason}`
+      );
+
+      // Also if there's purchase record with remaining debt, deduct from remaining_amount
+      if (batch.purchaseId) {
+        await this.prisma.$executeRawUnsafe(`
+          UPDATE "${schemaName}".purchases
+          SET remaining_amount = GREATEST(0, remaining_amount - $1)
+          WHERE id = $2::uuid;
+        `, refundTotal, batch.purchaseId);
+      }
+    }
+
+    return {
+      success: true,
+      message: `تم إرجاع ${packsReturned} علبة من الدواء (${batch.tradeName}) بنجاح وخصم مبلغ (${refundTotal.toLocaleString()} د.ع) من حساب المذخر`,
+      voucher: {
+        voucherNumber,
+        date: new Date().toISOString().slice(0, 10),
+        supplierName: batch.supplierName || 'المذخر الأصلي',
+        tradeName: batch.tradeName,
+        batchNumber: batch.batchNumber,
+        expiryDate: batch.expiryDate,
+        returnedUnits: qtyToReturn,
+        returnedPacks: packsReturned,
+        unitRefundPrice: unitPrice,
+        refundTotal,
+        reason,
+      },
+    };
+  }
+
+  /**
+   * Get Shortages and Reorder List grouped by Supplier with 3-tier severity
+   * (OUT_OF_STOCK, AT_MINIMUM, NEAR_MINIMUM)
+   */
+  async getShortagesBySupplier(query?: { supplierId?: string; severity?: string }) {
+    const schemaName = this.tenantContext.getSchemaName();
+    await this.ensurePurchaseTablesExist(schemaName);
+
+    // 1. Query all inventory items with their latest supplier and purchase details
+    const sql = `
+      WITH item_stock AS (
+        SELECT 
+          i.id as "inventoryItemId",
+          i.medicine_id as "medicineId",
+          COALESCE(i.custom_name, m.trade_name) as "tradeName",
+          m.scientific_name as "scientificName",
+          m.dosage_form as "dosageForm",
+          m.strength as "strength",
+          m.barcode as "barcode",
+          i.shelf_location as "shelfLocation",
+          COALESCE(i.units_per_pack, m.default_units_per_pack, 1) as "unitsPerPack",
+          COALESCE(i.min_alert_units, 5) as "minAlertUnits",
+          COALESCE(i.selling_price_pack, 0) as "sellingPricePack",
+          COALESCE(i.selling_price_unit, 0) as "sellingPriceUnit",
+          COALESCE(SUM(b.quantity_units_remaining), 0)::int as "totalUnitsRemaining",
+          -- Latest Batch info for supplier & purchase price
+          (
+            SELECT b_last.supplier_id 
+            FROM "${schemaName}".inventory_batches b_last 
+            WHERE b_last.inventory_item_id = i.id 
+            ORDER BY b_last.created_at DESC 
+            LIMIT 1
+          ) as "lastSupplierId",
+          (
+            SELECT COALESCE(b_last.purchase_price_pack, 0) 
+            FROM "${schemaName}".inventory_batches b_last 
+            WHERE b_last.inventory_item_id = i.id 
+            ORDER BY b_last.created_at DESC 
+            LIMIT 1
+          ) as "lastPurchasePricePack"
+        FROM "${schemaName}".inventory_items i
+        JOIN public.medicines m ON i.medicine_id = m.id
+        LEFT JOIN "${schemaName}".inventory_batches b ON i.id = b.inventory_item_id 
+          AND b.quantity_units_remaining > 0
+          AND b.expiry_date >= CURRENT_DATE 
+          AND (b.is_recalled IS FALSE OR b.is_recalled IS NULL)
+        GROUP BY i.id, m.id
+      )
+      SELECT 
+        s.*,
+        sup.name as "supplierName",
+        sup.phone as "supplierPhone"
+      FROM item_stock s
+      LEFT JOIN "${schemaName}".suppliers sup ON s."lastSupplierId" = sup.id
+      ORDER BY s."tradeName" ASC;
+    `;
+
+    const rawRows: any[] = await this.prisma.$queryRawUnsafe(sql);
+
+    // 2. Classify items into 3 Severity Tiers
+    const shortageItems: any[] = [];
+    let outOfStockCount = 0;
+    let atMinCount = 0;
+    let nearMinCount = 0;
+
+    for (const r of rawRows) {
+      const totalUnits = Number(r.totalUnitsRemaining || 0);
+      const unitsPerPack = Number(r.unitsPerPack || 1);
+      const minAlertUnits = Number(r.minAlertUnits || 5);
+      
+      // Near minimum threshold: up to 1.8x min_alert_units or + 2 packs
+      const nearMinThreshold = Math.max(minAlertUnits * 1.8, minAlertUnits + unitsPerPack * 2);
+
+      let severity: 'OUT_OF_STOCK' | 'AT_MINIMUM' | 'NEAR_MINIMUM' | null = null;
+      let severityLabelAr = '';
+      let severityRank = 3;
+
+      if (totalUnits === 0) {
+        severity = 'OUT_OF_STOCK';
+        severityLabelAr = '🔴 نافد تماماً (الرصيد 0)';
+        severityRank = 1;
+        outOfStockCount++;
+      } else if (totalUnits <= minAlertUnits) {
+        severity = 'AT_MINIMUM';
+        severityLabelAr = '🟠 وصل للحد الأدنى';
+        severityRank = 2;
+        atMinCount++;
+      } else if (totalUnits <= nearMinThreshold) {
+        severity = 'NEAR_MINIMUM';
+        severityLabelAr = '🟡 قريب من الحد الأدنى';
+        severityRank = 3;
+        nearMinCount++;
+      }
+
+      if (severity) {
+        // Suggested Order Packs: target 2.5x minAlertUnits
+        const targetUnits = Math.max(minAlertUnits * 2.5, unitsPerPack * 5);
+        const shortageUnits = Math.max(0, targetUnits - totalUnits);
+        const suggestedPacks = Math.max(1, Math.ceil(shortageUnits / unitsPerPack));
+
+        shortageItems.push({
+          id: r.inventoryItemId,
+          medicineId: r.medicineId,
+          tradeName: r.tradeName,
+          scientificName: r.scientificName || '',
+          dosageForm: r.dosageForm || '',
+          strength: r.strength || '',
+          barcode: r.barcode || '',
+          shelfLocation: r.shelfLocation || null,
+          unitsPerPack,
+          minAlertUnits,
+          minAlertPacks: Math.ceil(minAlertUnits / unitsPerPack),
+          totalUnitsRemaining: totalUnits,
+          availablePacks: Math.floor(totalUnits / unitsPerPack),
+          availableStrips: totalUnits % unitsPerPack,
+          purchasePricePack: Number(r.lastPurchasePricePack || 0),
+          sellingPricePack: Number(r.sellingPricePack || 0),
+          sellingPriceUnit: Number(r.sellingPriceUnit || 0),
+          supplierId: r.lastSupplierId || null,
+          supplierName: r.supplierName || 'غير مسجل (بدون مذخر)',
+          supplierPhone: r.supplierPhone || null,
+          severity,
+          severityLabelAr,
+          severityRank,
+          suggestedOrderPacks: suggestedPacks,
+        });
+      }
+    }
+
+    // Sort by severity rank (OUT_OF_STOCK first, then AT_MINIMUM, then NEAR_MINIMUM)
+    shortageItems.sort((a, b) => a.severityRank - b.severityRank || a.tradeName.localeCompare(b.tradeName));
+
+    // Filter by query if provided
+    let filteredItems = shortageItems;
+    if (query?.supplierId && query.supplierId.trim().length > 0) {
+      if (query.supplierId === 'UNASSIGNED') {
+        filteredItems = filteredItems.filter(it => !it.supplierId);
+      } else {
+        filteredItems = filteredItems.filter(it => it.supplierId === query.supplierId);
+      }
+    }
+    if (query?.severity && query.severity !== 'ALL') {
+      filteredItems = filteredItems.filter(it => it.severity === query.severity);
+    }
+
+    // 3. Group by Supplier
+    const supplierGroupsMap = new Map<string, any>();
+
+    for (const item of filteredItems) {
+      const key = item.supplierId || 'UNASSIGNED';
+      if (!supplierGroupsMap.has(key)) {
+        supplierGroupsMap.set(key, {
+          supplierId: item.supplierId,
+          supplierName: item.supplierName,
+          supplierPhone: item.supplierPhone,
+          outOfStockCount: 0,
+          atMinCount: 0,
+          nearMinCount: 0,
+          totalItemsCount: 0,
+          estimatedTotalCost: 0,
+          items: [],
+        });
+      }
+
+      const grp = supplierGroupsMap.get(key);
+      grp.items.push(item);
+      grp.totalItemsCount++;
+      grp.estimatedTotalCost += item.suggestedOrderPacks * item.purchasePricePack;
+      if (item.severity === 'OUT_OF_STOCK') grp.outOfStockCount++;
+      else if (item.severity === 'AT_MINIMUM') grp.atMinCount++;
+      else if (item.severity === 'NEAR_MINIMUM') grp.nearMinCount++;
+    }
+
+    const suppliersList = Array.from(supplierGroupsMap.values());
+    suppliersList.sort((a, b) => b.outOfStockCount - a.outOfStockCount || b.totalItemsCount - a.totalItemsCount);
+
+    return {
+      summary: {
+        totalShortagesCount: shortageItems.length,
+        outOfStockCount,
+        atMinCount,
+        nearMinCount,
+        suppliersCount: supplierGroupsMap.size,
+      },
+      suppliers: suppliersList,
+      allItems: filteredItems,
+    };
   }
 }

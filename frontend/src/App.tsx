@@ -7,8 +7,6 @@ import {
   ShieldCheck,
   Search,
   LogOut,
-  Building2,
-  AlertTriangle,
   Pill,
   UserCheck,
   Settings,
@@ -16,6 +14,10 @@ import {
   FileText,
   TrendingDown,
   LayoutDashboard,
+  Menu,
+  X,
+  ChevronRight,
+  ChevronLeft,
 } from 'lucide-react';
 import { PosView } from './views/PosView';
 import { BulkStockEntryView } from './views/BulkStockEntryView';
@@ -57,10 +59,25 @@ export const App: React.FC = () => {
   const [currentPharmacy, setCurrentPharmacy] = useState<any | null>(getStoredPharmacy());
   const [activeTab, setActiveTab] = useState<ActiveTab>('PUBLIC_SEARCH');
 
+  // Sidebar collapsible state (persisted)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('dawaee_sidebar_collapsed') === 'true';
+  });
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+
   // Proactive Alerts State
   const [expiringAlerts, setExpiringAlerts] = useState<any[]>([]);
   const [lowStockAlerts, setLowStockAlerts] = useState<any[]>([]);
   const [showAlertModal, setShowAlertModal] = useState<boolean>(false);
+
+  // Toggle and persist sidebar
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem('dawaee_sidebar_collapsed', String(next));
+      return next;
+    });
+  };
 
   // If token exists on first load, switch to POS or Admin
   useEffect(() => {
@@ -141,242 +158,337 @@ export const App: React.FC = () => {
     return <LoginView onLoginSuccess={handleLoginSuccess} />;
   }
 
-  return (
-    <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
-      {/* Top Main Navigation Bar */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-2xs">
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
-          {/* Logo & Pharmacy Name */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2.5">
-              {currentPharmacy?.logoUrl ? (
-                <img
-                  src={currentPharmacy.logoUrl}
-                  alt="Logo"
-                  className="w-9 h-9 rounded-xl object-contain bg-white border border-slate-200 p-0.5 shadow-xs"
-                />
-              ) : (
-                <div className="w-9 h-9 bg-emerald-600 text-white rounded-xl flex items-center justify-center font-black shadow-xs">
-                  <Pill className="w-5 h-5" />
-                </div>
-              )}
-              <div>
-                <span className="font-black text-lg text-slate-900">دوائي</span>
-                <span className="text-[10px] font-bold text-slate-400 mr-1 font-mono">POS</span>
-              </div>
-            </div>
+  // Helper navigation item component
+  const NavItem = ({
+    tab,
+    label,
+    icon: Icon,
+    badge,
+    activeColor = 'bg-emerald-600 text-white shadow-md shadow-emerald-900/30',
+  }: {
+    tab: ActiveTab;
+    label: string;
+    icon: any;
+    badge?: string;
+    activeColor?: string;
+  }) => {
+    const isActive = activeTab === tab;
+    return (
+      <button
+        onClick={() => {
+          setActiveTab(tab);
+          setIsMobileMenuOpen(false);
+        }}
+        title={isSidebarCollapsed ? label : undefined}
+        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all duration-150 cursor-pointer group relative ${
+          isActive
+            ? activeColor
+            : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/70'
+        }`}
+      >
+        <Icon
+          className={`w-5 h-5 shrink-0 transition-transform group-hover:scale-110 ${
+            isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'
+          }`}
+        />
+        {!isSidebarCollapsed && (
+          <span className="truncate flex-1 text-right">{label}</span>
+        )}
+        {!isSidebarCollapsed && badge && (
+          <span className="px-2 py-0.5 text-[10px] font-black rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+            {badge}
+          </span>
+        )}
 
-            {/* Current Pharmacy Badge */}
-            {currentPharmacy && (
-              <div className="hidden md:flex items-center gap-2 pr-4 border-r border-slate-200">
-                <Building2 className="w-4 h-4 text-slate-400" />
-                <span className="font-bold text-xs text-slate-800">{currentPharmacy.name}</span>
-                {currentPharmacy.subscriptionStatus === 'EXPIRED' && (
-                  <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-[10px] font-extrabold flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" />
-                    وضع القراءة فقط (انتهى الاشتراك)
-                  </span>
-                )}
+        {/* Hover Tooltip for Collapsed Mode */}
+        {isSidebarCollapsed && (
+          <div className="absolute right-full top-1/2 -translate-y-1/2 mr-3 px-3 py-1.5 bg-slate-950 text-white text-xs font-black rounded-xl whitespace-nowrap shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-all z-50 border border-slate-800">
+            {label}
+            {badge && ` (${badge})`}
+          </div>
+        )}
+      </button>
+    );
+  };
+
+  const SectionHeading = ({ title }: { title: string }) => {
+    if (isSidebarCollapsed) {
+      return <div className="h-px bg-slate-800/80 my-2 mx-1" />;
+    }
+    return (
+      <div className="text-[10px] font-black text-slate-400 px-3 pt-3 pb-1 tracking-wider uppercase">
+        {title}
+      </div>
+    );
+  };
+
+  return (
+    <div className="h-screen w-screen bg-slate-100 flex flex-row text-slate-900 font-sans antialiased overflow-hidden">
+      {/* Mobile Backdrop Overlay */}
+      {isMobileMenuOpen && (
+        <div
+          onClick={() => setIsMobileMenuOpen(false)}
+          className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-40 md:hidden animate-in fade-in duration-200"
+        />
+      )}
+
+      {/* Fixed Structure Sidebar */}
+      <aside
+        className={`h-screen bg-slate-900 text-white flex flex-col justify-between border-l border-slate-800 z-40 transition-all duration-300 ease-in-out shrink-0 select-none shadow-xl md:shadow-none fixed md:static ${
+          isMobileMenuOpen
+            ? 'translate-x-0 w-64'
+            : '-translate-x-full md:translate-x-0 ' + (isSidebarCollapsed ? 'w-20' : 'w-64')
+        }`}
+      >
+        {/* Top Logo & Collapse Toggle */}
+        <div className="h-14 px-4 flex items-center justify-between border-b border-slate-800 shrink-0">
+          <div className="flex items-center gap-3 overflow-hidden">
+            {currentPharmacy?.logoUrl ? (
+              <img
+                src={currentPharmacy.logoUrl}
+                alt="Logo"
+                className="w-9 h-9 rounded-xl object-contain bg-white p-0.5 shadow-md shrink-0"
+              />
+            ) : (
+              <div className="w-9 h-9 bg-emerald-600 text-white rounded-xl flex items-center justify-center font-black shadow-md shrink-0">
+                <Pill className="w-5 h-5" />
+              </div>
+            )}
+
+            {!isSidebarCollapsed && (
+              <div className="truncate">
+                <div className="font-black text-sm text-white flex items-center gap-1.5">
+                  <span>{currentPharmacy?.name || 'نظام دوائي'}</span>
+                </div>
+                <div className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>متصل بالسحابة</span>
+                </div>
               </div>
             )}
           </div>
 
-          {/* Navigation Links */}
-          <nav className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
-            {currentUser?.role === 'SUPER_ADMIN' ? (
-              <button
-                onClick={() => setActiveTab('ADMIN')}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  activeTab === 'ADMIN'
-                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                    : 'text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <ShieldCheck className="w-4 h-4" />
-                الإدارة
-              </button>
+          {/* Desktop Toggle Button */}
+          <button
+            onClick={toggleSidebar}
+            className="hidden md:flex p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-all cursor-pointer"
+            title={isSidebarCollapsed ? 'توسيع القائمة الجانبية' : 'طي القائمة الجانبية'}
+          >
+            {isSidebarCollapsed ? (
+              <ChevronLeft className="w-5 h-5 text-slate-300" />
             ) : (
-              <>
-                <button
-                  onClick={() => setActiveTab('POS')}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                    activeTab === 'POS'
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs font-black'
-                      : 'text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <ShoppingCart className="w-4 h-4" />
-                  الكاشير
-                </button>
-
-                <button
-                  onClick={() => setActiveTab('INVENTORY')}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                    activeTab === 'INVENTORY'
-                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs font-black'
-                      : 'text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <Package className="w-4 h-4" />
-                  المخزون
-                </button>
-
-                <button
-                  onClick={() => setActiveTab('PURCHASES')}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                    activeTab === 'PURCHASES'
-                      ? 'bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs font-black'
-                      : 'text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <FileText className="w-4 h-4" />
-                  المشتريات
-                </button>
-
-                <button
-                  onClick={() => setActiveTab('BULK_STOCK')}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                    activeTab === 'BULK_STOCK'
-                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs font-black'
-                      : 'text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <PackagePlus className="w-4 h-4" />
-                  إدخال وجبة
-                </button>
-
-                {currentUser?.role === 'OWNER' && (
-                  <button
-                    onClick={() => setActiveTab('EXPENSES')}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                      activeTab === 'EXPENSES'
-                        ? 'bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs font-black'
-                        : 'text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    <TrendingDown className="w-4 h-4" />
-                    المصاريف
-                  </button>
-                )}
-
-                {currentUser?.role === 'OWNER' && (
-                  <button
-                    onClick={() => setActiveTab('SUPPLIERS')}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                      activeTab === 'SUPPLIERS'
-                        ? 'bg-amber-50 text-amber-700 border border-amber-200 shadow-2xs font-black'
-                        : 'text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Banknote className="w-4 h-4" />
-                    المذاخر
-                  </button>
-                )}
-
-                {currentUser?.role === 'OWNER' && (
-                  <button
-                    onClick={() => setActiveTab('REPORTS')}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                      activeTab === 'REPORTS'
-                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs font-black'
-                        : 'text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    <TrendingUp className="w-4 h-4" />
-                    التقارير
-                  </button>
-                )}
-
-                {currentUser?.role === 'OWNER' && (
-                  <button
-                    onClick={() => setActiveTab('OWNER_DASHBOARD')}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                      activeTab === 'OWNER_DASHBOARD'
-                        ? 'bg-slate-900 text-white shadow-2xs font-black'
-                        : 'text-slate-600 hover:bg-slate-50'
-                    }`}
-                    title="لوحة المتابعة اللحظية للمالك"
-                  >
-                    <LayoutDashboard className="w-4 h-4 text-emerald-400" />
-                    متابعة المالك
-                  </button>
-                )}
-
-                {currentUser?.role === 'OWNER' && (
-                  <button
-                    onClick={() => setActiveTab('PROFILE')}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                      activeTab === 'PROFILE'
-                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs font-black'
-                        : 'text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Settings className="w-4 h-4" />
-                    الإعدادات
-                  </button>
-                )}
-              </>
+              <ChevronRight className="w-5 h-5 text-slate-300" />
             )}
+          </button>
 
-            {/* Public Search Button */}
-            <button
-              onClick={() => setActiveTab('PUBLIC_SEARCH')}
-              className="flex items-center gap-1.5 px-3 py-2 text-slate-500 hover:text-slate-800 text-xs font-bold hover:bg-slate-50 rounded-xl transition-colors mr-2 cursor-pointer"
-              title="صفحة البحث المفتوحة للجمهور"
-            >
-              <Search className="w-4 h-4" />
-              البحث
-            </button>
-          </nav>
+          {/* Mobile Close Button */}
+          <button
+            onClick={() => setIsMobileMenuOpen(false)}
+            className="md:hidden p-1.5 text-slate-400 hover:text-white"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
 
-          {/* User Profile & Logout */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                if (currentUser?.role === 'OWNER') {
-                  setActiveTab('PROFILE');
-                }
-              }}
-              className={`text-left pl-2 hidden sm:flex items-center gap-2 p-1.5 rounded-xl transition-colors ${
-                currentUser?.role === 'OWNER' ? 'hover:bg-slate-100 cursor-pointer' : ''
-              }`}
-              title={currentUser?.role === 'OWNER' ? 'فتح الملف الشخصي وإعدادات الصيدلية' : ''}
-            >
-              <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold text-xs">
+        {/* Scrollable Navigation Items */}
+        <div className="flex-1 overflow-y-auto px-3 py-3 space-y-1 no-scrollbar">
+          {currentUser?.role === 'SUPER_ADMIN' ? (
+            <>
+              <SectionHeading title="الإدارة العامة" />
+              <NavItem
+                tab="ADMIN"
+                label="لوحة تحكم المنصة"
+                icon={ShieldCheck}
+                activeColor="bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+              />
+            </>
+          ) : (
+            <>
+              {/* Sales & POS */}
+              <SectionHeading title="المبيعات والكاشير" />
+              <NavItem
+                tab="POS"
+                label="نقطة البيع (الكاشير)"
+                icon={ShoppingCart}
+                badge="رئيسي"
+                activeColor="bg-emerald-600 text-white shadow-md shadow-emerald-900/30"
+              />
+
+              {/* Warehouse & Inventory */}
+              <SectionHeading title="إدارة المخزون والمشتريات" />
+              <NavItem
+                tab="INVENTORY"
+                label="المخزون والباركود"
+                icon={Package}
+                activeColor="bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+              />
+              <NavItem
+                tab="PURCHASES"
+                label="فواتير المشتريات"
+                icon={FileText}
+                activeColor="bg-blue-600 text-white shadow-md shadow-blue-900/30"
+              />
+              <NavItem
+                tab="BULK_STOCK"
+                label="إدخال وجبة سريعة"
+                icon={PackagePlus}
+                activeColor="bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+              />
+
+              {/* Financial & Accounts */}
+              {currentUser?.role === 'OWNER' && (
+                <>
+                  <SectionHeading title="المالية والأرباح" />
+                  <NavItem
+                    tab="EXPENSES"
+                    label="المصاريف التشغيلية"
+                    icon={TrendingDown}
+                    activeColor="bg-rose-600 text-white shadow-md shadow-rose-900/30"
+                  />
+                  <NavItem
+                    tab="SUPPLIERS"
+                    label="المذاخر والديون"
+                    icon={Banknote}
+                    activeColor="bg-amber-600 text-white shadow-md shadow-amber-900/30"
+                  />
+                  <NavItem
+                    tab="REPORTS"
+                    label="التقارير والأرباح P&L"
+                    icon={TrendingUp}
+                    activeColor="bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                  />
+                </>
+              )}
+
+              {/* Management & Live Monitoring */}
+              {currentUser?.role === 'OWNER' && (
+                <>
+                  <SectionHeading title="المتابعة والإعدادات" />
+                  <NavItem
+                    tab="OWNER_DASHBOARD"
+                    label="متابعة المالك (Live)"
+                    icon={LayoutDashboard}
+                    activeColor="bg-slate-800 border border-slate-700 text-emerald-400 shadow-md"
+                  />
+                  <NavItem
+                    tab="PROFILE"
+                    label="إعدادات الصيدلية"
+                    icon={Settings}
+                    activeColor="bg-slate-700 text-white shadow-md"
+                  />
+                </>
+              )}
+            </>
+          )}
+
+          {/* Public Search Portal preview */}
+          <SectionHeading title="شبكة البحث" />
+          <NavItem
+            tab="PUBLIC_SEARCH"
+            label="بحث الجمهور الشبكي"
+            icon={Search}
+            activeColor="bg-teal-600 text-white shadow-md"
+          />
+        </div>
+
+        {/* User Card & Logout Footer */}
+        <div className="p-3 border-t border-slate-800 bg-slate-950/50 shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 overflow-hidden">
+              <div className="w-8 h-8 rounded-xl bg-slate-800 border border-slate-700 text-emerald-400 flex items-center justify-center font-bold text-xs shrink-0">
                 <UserCheck className="w-4 h-4" />
               </div>
-              <div>
-                <div className="text-xs font-bold text-slate-900">{currentUser?.name || 'مستخدم'}</div>
-                <div className="text-[10px] text-slate-400 font-mono">
-                  {currentUser?.role === 'OWNER' ? 'صاحب الصيدلية' : currentUser?.role === 'SUPER_ADMIN' ? 'المدير العام' : 'كاشير'}
+              {!isSidebarCollapsed && (
+                <div className="truncate">
+                  <div className="text-xs font-bold text-slate-200 truncate">
+                    {currentUser?.name || 'المستخدم'}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono">
+                    {currentUser?.role === 'OWNER'
+                      ? 'صاحب الصيدلية'
+                      : currentUser?.role === 'SUPER_ADMIN'
+                      ? 'المدير العام'
+                      : 'كاشير الصيدلية'}
+                  </div>
                 </div>
-              </div>
-            </button>
+              )}
+            </div>
 
             <button
               onClick={handleLogout}
-              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+              className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer shrink-0"
               title="تسجيل الخروج"
             >
               <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>
-      </header>
+      </aside>
 
-      {/* Main Content Area */}
-      <main className="max-w-7xl mx-auto w-full px-4 py-5 flex-1">
-        {activeTab === 'POS' && <PosView />}
-        {activeTab === 'BULK_STOCK' && <BulkStockEntryView />}
-        {activeTab === 'INVENTORY' && <InventoryView />}
-        {activeTab === 'PURCHASES' && <PurchasesView />}
-        {activeTab === 'EXPENSES' && <ExpensesView />}
-        {activeTab === 'OWNER_DASHBOARD' && <OwnerMobileDashboardView />}
-        {activeTab === 'SUPPLIERS' && <SuppliersDebtView />}
-        {activeTab === 'REPORTS' && <ReportsView />}
-        {activeTab === 'PROFILE' && <PharmacyProfileView />}
-        {activeTab === 'ADMIN' && <SuperAdminView />}
-      </main>
+      {/* Main Content Area (Fixed Top Header + Scrollable Content) */}
+      <div className="flex-1 flex flex-col h-screen min-w-0 overflow-hidden bg-slate-100">
+        {/* Slim Fixed Top Bar */}
+        <header className="bg-white border-b border-slate-200/90 h-14 px-5 flex items-center justify-between shrink-0 shadow-2xs">
+          <div className="flex items-center gap-3">
+            {/* Mobile Hamburger Toggle */}
+            <button
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="md:hidden p-2 text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
+            {/* Current Active Page Title & Breadcrumb */}
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+              <span className="text-slate-400 hidden sm:inline">{currentPharmacy?.name || 'دوائي'}</span>
+              <span className="text-slate-300 hidden sm:inline">/</span>
+              <span className="text-slate-900 font-black">
+                {activeTab === 'POS' && 'الكاشير والمبيعات السريعة'}
+                {activeTab === 'INVENTORY' && 'إدارة المخزون والباركود'}
+                {activeTab === 'PURCHASES' && 'أرشيف وفواتير المشتريات'}
+                {activeTab === 'BULK_STOCK' && 'إدخال وجبة أدوية'}
+                {activeTab === 'EXPENSES' && 'المصاريف التشغيلية وصافي الأرباح'}
+                {activeTab === 'SUPPLIERS' && 'المذاخر وحسابات الديون'}
+                {activeTab === 'REPORTS' && 'التقارير والأرباح P&L'}
+                {activeTab === 'OWNER_DASHBOARD' && 'لوحة المتابعة اللحظية للمالك'}
+                {activeTab === 'PROFILE' && 'إعدادات وهوية الصيدلية'}
+                {activeTab === 'ADMIN' && 'لوحة الإدارة العامة'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Quick Open Public Search button */}
+            <button
+              onClick={() => setActiveTab('PUBLIC_SEARCH')}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              title="معاينة شبكة البحث العامة للمواطنين"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">بحث الشبكة</span>
+            </button>
+
+            {/* Quick Role Badge */}
+            <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-[11px] font-bold border border-slate-200">
+              {currentUser?.name}
+            </span>
+          </div>
+        </header>
+
+        {/* Dynamic View Component with Independent Smooth Scroll */}
+        <main className="flex-1 overflow-y-auto p-3 sm:p-5 w-full">
+          {activeTab === 'POS' && <PosView />}
+          {activeTab === 'BULK_STOCK' && <BulkStockEntryView />}
+          {activeTab === 'INVENTORY' && <InventoryView />}
+          {activeTab === 'PURCHASES' && <PurchasesView />}
+          {activeTab === 'EXPENSES' && <ExpensesView />}
+          {activeTab === 'OWNER_DASHBOARD' && <OwnerMobileDashboardView />}
+          {activeTab === 'SUPPLIERS' && <SuppliersDebtView />}
+          {activeTab === 'REPORTS' && <ReportsView />}
+          {activeTab === 'PROFILE' && <PharmacyProfileView />}
+          {activeTab === 'ADMIN' && <SuperAdminView />}
+        </main>
+      </div>
 
       {/* Proactive Expiry & Low Stock Alerts Modal */}
       {showAlertModal && (

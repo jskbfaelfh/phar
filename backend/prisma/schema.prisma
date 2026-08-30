@@ -49,6 +49,7 @@ model Tenant {
   showPhoneNumber    Boolean            @default(true) @map("show_phone_number")
   showWhatsapp       Boolean            @default(true) @map("show_whatsapp")
   is24Hours          Boolean            @default(false) @map("is_24_hours")
+  geminiApiKey       String?            @map("gemini_api_key") @db.Text
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
 

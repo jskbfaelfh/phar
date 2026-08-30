@@ -2,12 +2,21 @@ import { Controller, Get, Post, Body, Param, Query, UseGuards, Request } from '@
 import { AuthGuard } from '@nestjs/passport';
 import { SubscriptionGuard } from '../../common/guards/subscription.guard';
 import { PurchasesService } from './purchases.service';
+import { OcrAiService } from './ocr-ai.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 
 @Controller('purchases')
 @UseGuards(AuthGuard('jwt'), SubscriptionGuard)
 export class PurchasesController {
-  constructor(private readonly purchasesService: PurchasesService) {}
+  constructor(
+    private readonly purchasesService: PurchasesService,
+    private readonly ocrAiService: OcrAiService,
+  ) {}
+
+  @Post('ai-scan-invoice')
+  aiScanInvoice(@Request() req: any, @Body() body: { imageBase64: string }) {
+    return this.ocrAiService.processInvoiceImage(req.user.tenantId, body.imageBase64);
+  }
 
   @Post()
   createPurchase(@Request() req: any, @Body() dto: CreatePurchaseDto) {

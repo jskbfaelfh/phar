@@ -56,6 +56,10 @@ export class UpdatePharmacyProfileDto {
 
   @IsOptional()
   is24Hours?: boolean;
+
+  @IsOptional()
+  @IsString()
+  geminiApiKey?: string;
 }
 
 export class ChangeOwnerPasswordDto {

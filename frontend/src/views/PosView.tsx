@@ -18,10 +18,13 @@ import {
   Maximize2,
   Minimize2,
   Lock,
+  Mic,
+  Sparkles,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250 } from '../utils/currency';
 import { usePharmacyLiveSync } from '../hooks/usePharmacyLiveSync';
+import { SmartSearchModal } from '../components/SmartSearchModal';
 import {
   cacheInventoryLocally,
   searchLocalInventory,
@@ -61,6 +64,7 @@ interface SearchMedicine {
   barcode?: string;
   dosageForm?: string;
   strength?: string;
+  shelfLocation?: string;
   activeBatches?: ActiveBatchInfo[];
 }
 
@@ -78,6 +82,7 @@ interface CartItem {
   customName?: string;
   tradeName: string;
   scientificName: string;
+  shelfLocation?: string;
   unitType: 'PACK' | 'STRIP';
   quantity: number;
   unitPrice: number;
@@ -246,6 +251,10 @@ export const PosView: React.FC = () => {
   const [returnUnitType, setReturnUnitType] = useState<'PACK' | 'STRIP'>('PACK');
   const [returnQty, setReturnQty] = useState(1);
   const [returnReason, setReturnReason] = useState('');
+
+  // Smart Search & Voice AI state
+  const [showSmartSearch, setShowSmartSearch] = useState(false);
+  const [smartSearchAutoVoice, setSmartSearchAutoVoice] = useState(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -423,6 +432,7 @@ export const PosView: React.FC = () => {
           customName: med.customName,
           tradeName: med.tradeName,
           scientificName: med.scientificName,
+          shelfLocation: med.shelfLocation,
           unitType,
           quantity: 1,
           unitPrice: effectiveUnitPrice,
@@ -738,18 +748,46 @@ export const PosView: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-0">
         {/* Right Section: Fast Search & Results (7 Cols) */}
         <div className="lg:col-span-7 flex flex-col bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="p-4 border-b border-slate-200 bg-slate-50/50">
-            <div className="relative">
-              <Search className="w-5 h-5 absolute right-3.5 top-3.5 text-slate-400" />
+          <div className="p-3.5 border-b border-slate-200 bg-slate-50/50 flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute right-3.5 top-3.5 text-slate-400" />
               <input
                 ref={searchInputRef}
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="بحث أو باركود..."
-                className="w-full pr-11 pl-4 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm font-bold shadow-xs"
+                placeholder="بحث سريع أو باركود..."
+                className="w-full pr-10 pl-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-xs sm:text-sm font-bold shadow-xs"
               />
             </div>
+
+            {/* Voice Search Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setSmartSearchAutoVoice(true);
+                setShowSmartSearch(true);
+              }}
+              className="p-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl transition-all cursor-pointer shadow-2xs active:scale-95 flex items-center gap-1.5 text-xs font-black shrink-0"
+              title="البحث الصوتي الذكي (Voice AI)"
+            >
+              <Mic className="w-4 h-4 text-rose-600 animate-pulse" />
+              <span className="hidden sm:inline">صوتي 🎙️</span>
+            </button>
+
+            {/* Smart Clinical Search Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setSmartSearchAutoVoice(false);
+                setShowSmartSearch(true);
+              }}
+              className="p-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl transition-all cursor-pointer shadow-2xs active:scale-95 flex items-center gap-1.5 text-xs font-black shrink-0"
+              title="البحث باللغة الطبيعية والبدائل (AI Co-Pilot)"
+            >
+              <Sparkles className="w-4 h-4 text-indigo-600" />
+              <span className="hidden md:inline">مساعد ذكي 🧠</span>
+            </button>
           </div>
 
           {/* Results List */}
@@ -769,6 +807,11 @@ export const PosView: React.FC = () => {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-slate-900 text-sm">{med.tradeName}</span>
+                          {med.shelfLocation && (
+                            <span className="px-2 py-0.5 bg-amber-50 text-amber-900 border border-amber-300 rounded-md text-[10px] font-black font-mono shadow-2xs">
+                              📍 {med.shelfLocation}
+                            </span>
+                          )}
                           {med.customName && (
                             <span className="px-2 py-0.5 bg-amber-50 text-amber-900 border border-amber-200 rounded-md text-xs font-black">
                               🏷️ {med.customName}
@@ -864,8 +907,13 @@ export const PosView: React.FC = () => {
               cart.map((item, idx) => (
                 <div key={`${item.inventoryItemId}-${item.unitType}-${item.inventoryBatchId || ''}`} className="py-2 flex items-center justify-between gap-2">
                   <div className="flex-1 min-w-0">
-                    <div className="font-bold text-slate-900 text-xs truncate flex items-center gap-1">
+                    <div className="font-bold text-slate-900 text-xs truncate flex items-center gap-1 flex-wrap">
                       <span>{item.tradeName}</span>
+                      {item.shelfLocation && (
+                        <span className="text-amber-900 font-bold text-[9px] bg-amber-50 px-1 py-0.2 rounded border border-amber-200 font-mono">
+                          📍 {item.shelfLocation}
+                        </span>
+                      )}
                       {item.batchNumber && (
                         <span className="text-indigo-800 font-bold text-[9px] bg-indigo-50 px-1 py-0.2 rounded border border-indigo-200 font-mono">
                           تشغيلة: {item.batchNumber}
@@ -1411,6 +1459,32 @@ export const PosView: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* AI Voice & Natural Language Smart Search Modal */}
+      {showSmartSearch && (
+        <SmartSearchModal
+          autoStartVoice={smartSearchAutoVoice}
+          onClose={() => setShowSmartSearch(false)}
+          onAddToCart={(med, unitType) => {
+            const mappedMed: SearchMedicine = {
+              id: med.id,
+              medicineId: med.id,
+              customName: med.tradeName,
+              tradeName: med.tradeName,
+              scientificName: med.scientificName || '',
+              unitsPerPack: med.unitsPerPack || 1,
+              sellingPricePack: Number(med.sellingPricePack || 0),
+              sellingPriceUnit: Number(med.sellingPriceUnit || 0),
+              availablePacks: med.availablePacks || 0,
+              availableStrips: med.availableStrips || 0,
+              totalUnitsRemaining: med.totalUnitsRemaining || 0,
+            };
+            addToCart(mappedMed, unitType === 'PACK' ? 'PACK' : 'STRIP');
+            setMessage({ type: 'success', text: `تمت إضافة (${med.tradeName}) إلى الفاتورة` });
+            setTimeout(() => setMessage(null), 2500);
+          }}
+        />
       )}
     </>
   );

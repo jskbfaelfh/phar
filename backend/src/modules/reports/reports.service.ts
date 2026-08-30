@@ -226,7 +226,8 @@ export class ReportsService {
   }
 
   /**
-   * Sold Medicines Outflow Stocktake (Daily, Weekly, Monthly, Yearly)
+   * Sold Medicines & Product-Level Profitability Analytics (Daily, Weekly, Monthly, Yearly)
+   * Analyzes not just sales volume, but exact profit generated per product, profit margin %, and profitability rank
    */
   async getSoldMedicinesStocktake(dto: DateRangeDto) {
     const schemaName = this.tenantContext.getSchemaName();
@@ -245,27 +246,41 @@ export class ReportsService {
     const sql = `
       SELECT 
         m.id as "medicineId",
-        m.trade_name as "tradeName",
+        COALESCE(ii.custom_name, m.trade_name) as "tradeName",
+        m.trade_name as "originalTradeName",
         m.scientific_name as "scientificName",
         m.dosage_form as "dosageForm",
         m.barcode,
         ii.units_per_pack as "unitsPerPack",
+        ii.selling_price_pack as "sellingPricePack",
         COUNT(DISTINCT s.id)::int as "invoicesCount",
         SUM(CASE WHEN si.unit_type = 'PACK' THEN si.quantity ELSE 0 END)::int as "soldPacks",
         SUM(CASE WHEN si.unit_type = 'STRIP' THEN si.quantity ELSE 0 END)::int as "soldStrips",
-        COALESCE(SUM(
-          CASE 
-            WHEN si.unit_type = 'PACK' THEN si.quantity * COALESCE(b.purchase_price_pack, 0)
-            ELSE (si.quantity::numeric / GREATEST(ii.units_per_pack, 1)) * COALESCE(b.purchase_price_pack, 0)
-          END
-        ), 0)::numeric as "totalCost",
-        COALESCE(SUM(si.total_price), 0)::numeric as "totalRevenue",
-        COALESCE(SUM(si.total_price), 0)::numeric - COALESCE(SUM(
-          CASE 
-            WHEN si.unit_type = 'PACK' THEN si.quantity * COALESCE(b.purchase_price_pack, 0)
-            ELSE (si.quantity::numeric / GREATEST(ii.units_per_pack, 1)) * COALESCE(b.purchase_price_pack, 0)
-          END
-        ), 0)::numeric as "totalProfit"
+        ROUND(
+          SUM(
+            CASE 
+              WHEN si.unit_type = 'PACK' THEN si.quantity
+              ELSE (si.quantity::numeric / GREATEST(ii.units_per_pack, 1))
+            END
+          ), 2
+        )::numeric as "totalEquivalentPacks",
+        ROUND(
+          COALESCE(SUM(
+            CASE 
+              WHEN si.unit_type = 'PACK' THEN si.quantity * COALESCE(b.purchase_price_pack, 0)
+              ELSE (si.quantity::numeric / GREATEST(ii.units_per_pack, 1)) * COALESCE(b.purchase_price_pack, 0)
+            END
+          ), 0), 0
+        )::numeric as "totalCost",
+        ROUND(COALESCE(SUM(si.total_price), 0), 0)::numeric as "totalRevenue",
+        ROUND(
+          COALESCE(SUM(si.total_price), 0) - COALESCE(SUM(
+            CASE 
+              WHEN si.unit_type = 'PACK' THEN si.quantity * COALESCE(b.purchase_price_pack, 0)
+              ELSE (si.quantity::numeric / GREATEST(ii.units_per_pack, 1)) * COALESCE(b.purchase_price_pack, 0)
+            END
+          ), 0), 0
+        )::numeric as "totalProfit"
       FROM "${schemaName}".sale_items si
       JOIN "${schemaName}".sales s ON si.sale_id = s.id
       JOIN "${schemaName}".inventory_items ii ON si.inventory_item_id = ii.id
@@ -273,11 +288,70 @@ export class ReportsService {
       LEFT JOIN "${schemaName}".inventory_batches b ON si.inventory_batch_id = b.id
       ${dateFilter}
       GROUP BY m.id, ii.id
-      ORDER BY "totalRevenue" DESC;
+      ORDER BY "totalProfit" DESC;
     `;
 
-    const items: any[] = await this.prisma.$queryRawUnsafe(sql, ...params);
-    return items;
+    const rawItems: any[] = await this.prisma.$queryRawUnsafe(sql, ...params);
+
+    let sumRevenue = 0;
+    let sumCost = 0;
+    let sumProfit = 0;
+    let sumSoldPacks = 0;
+    let sumInvoices = 0;
+
+    const items = rawItems.map((it) => {
+      const revenue = Number(it.totalRevenue || 0);
+      const cost = Number(it.totalCost || 0);
+      const profit = Number(it.totalProfit || 0);
+      const eqPacks = Number(it.totalEquivalentPacks || 0);
+
+      sumRevenue += revenue;
+      sumCost += cost;
+      sumProfit += profit;
+      sumSoldPacks += Number(it.soldPacks || 0);
+      sumInvoices += Number(it.invoicesCount || 0);
+
+      const marginPercent = revenue > 0 ? Number(((profit / revenue) * 100).toFixed(1)) : 0;
+      const profitPerPack = eqPacks > 0 ? Math.round(profit / eqPacks) : 0;
+
+      return {
+        ...it,
+        totalRevenue: revenue,
+        totalCost: cost,
+        totalProfit: profit,
+        profitMarginPercent: marginPercent,
+        profitPerPack,
+      };
+    });
+
+    // Add contribution percentage
+    const enrichedItems = items.map((it) => ({
+      ...it,
+      profitContributionPercent: sumProfit > 0 ? Number(((it.totalProfit / sumProfit) * 100).toFixed(1)) : 0,
+    }));
+
+    // Find top profit generator vs top volume medicine
+    const sortedByProfit = [...enrichedItems].sort((a, b) => b.totalProfit - a.totalProfit);
+    const sortedByVolume = [...enrichedItems].sort((a, b) => (b.soldPacks + b.soldStrips) - (a.soldPacks + a.soldStrips));
+
+    return {
+      period: {
+        from: dto.from || 'البداية',
+        to: dto.to || 'الآن',
+      },
+      summary: {
+        totalRevenue: sumRevenue,
+        totalCost: sumCost,
+        totalProfit: sumProfit,
+        averageProfitMargin: sumRevenue > 0 ? Number(((sumProfit / sumRevenue) * 100).toFixed(1)) : 0,
+        totalSoldPacks: sumSoldPacks,
+        totalInvoices: sumInvoices,
+        distinctMedicinesCount: enrichedItems.length,
+        topProfitMedicine: sortedByProfit[0] || null,
+        topVolumeMedicine: sortedByVolume[0] || null,
+      },
+      items: enrichedItems,
+    };
   }
 
   /**
@@ -473,11 +547,155 @@ export class ReportsService {
   }
 
   /**
-   * Dead Stock (Stagnant Inventory) Analytics Report
+   * Dead Stock (Stagnant Inventory & Frozen Capital Discovery)
+   * Discovers medicines that haven't been sold for X days (e.g. 60, 90, 180 days or never sold),
+   * calculates frozen capital, links expiry dates and supplier contact info for return.
    */
-  async getDeadStockReport(thresholdDays: number = 60) {
+  async getDeadStockReport(thresholdDays: number = 90) {
     const schemaName = this.tenantContext.getSchemaName();
-    const days = Number(thresholdDays) || 60;
+    const days = Number(thresholdDays) || 90;
+
+    let timeFilter = `OR MAX(s.created_at) < (CURRENT_TIMESTAMP - INTERVAL '${days} days')`;
+    if (days >= 9999) {
+      // Never sold filter
+      timeFilter = '';
+    }
+
+    const sql = `
+      SELECT 
+        ii.id as "inventoryItemId",
+        COALESCE(ii.custom_name, m.trade_name) as "tradeName",
+        m.trade_name as "originalTradeName",
+        m.scientific_name as "scientificName",
+        m.dosage_form as "dosageForm",
+        m.barcode,
+        ii.units_per_pack as "unitsPerPack",
+        ii.selling_price_pack as "sellingPricePack",
+        COALESCE(SUM(b.quantity_units_remaining), 0)::int as "totalUnitsRemaining",
+        FLOOR(COALESCE(SUM(b.quantity_units_remaining), 0)::numeric / GREATEST(ii.units_per_pack, 1))::int as "packsRemaining",
+        (COALESCE(SUM(b.quantity_units_remaining), 0) % GREATEST(ii.units_per_pack, 1))::int as "stripsRemaining",
+        ROUND(COALESCE(AVG(b.purchase_price_pack), 0), 0)::numeric as "avgCostPack",
+        ROUND(
+          COALESCE(
+            SUM((b.quantity_units_remaining::numeric / GREATEST(ii.units_per_pack, 1)) * COALESCE(b.purchase_price_pack, 0)),
+            0
+          ), 0
+        )::numeric as "stagnantCapital",
+        MAX(s.created_at) as "lastSoldAt",
+        MIN(b.expiry_date) as "earliestExpiry",
+        TO_CHAR(MIN(b.expiry_date), 'MM/YYYY') as "expiryFormatted",
+        (MIN(b.expiry_date) - CURRENT_DATE)::int as "daysUntilExpiry",
+        (
+          SELECT b_sub.batch_number
+          FROM "${schemaName}".inventory_batches b_sub
+          WHERE b_sub.inventory_item_id = ii.id AND b_sub.quantity_units_remaining > 0
+          ORDER BY b_sub.expiry_date ASC LIMIT 1
+        ) as "oldestBatchNumber",
+        (
+          SELECT s_sub.name 
+          FROM "${schemaName}".inventory_batches b_sub
+          LEFT JOIN "${schemaName}".suppliers s_sub ON b_sub.supplier_id = s_sub.id
+          WHERE b_sub.inventory_item_id = ii.id AND b_sub.quantity_units_remaining > 0
+          ORDER BY b_sub.created_at DESC LIMIT 1
+        ) as "supplierName",
+        (
+          SELECT s_sub.phone 
+          FROM "${schemaName}".inventory_batches b_sub
+          LEFT JOIN "${schemaName}".suppliers s_sub ON b_sub.supplier_id = s_sub.id
+          WHERE b_sub.inventory_item_id = ii.id AND b_sub.quantity_units_remaining > 0
+          ORDER BY b_sub.created_at DESC LIMIT 1
+        ) as "supplierPhone"
+      FROM "${schemaName}".inventory_items ii
+      JOIN public.medicines m ON ii.medicine_id = m.id
+      LEFT JOIN "${schemaName}".inventory_batches b ON ii.id = b.inventory_item_id AND b.quantity_units_remaining > 0
+      LEFT JOIN "${schemaName}".sale_items si ON ii.id = si.inventory_item_id
+      LEFT JOIN "${schemaName}".sales s ON si.sale_id = s.id
+      GROUP BY ii.id, m.id
+      HAVING 
+        COALESCE(SUM(b.quantity_units_remaining), 0) > 0
+        AND (
+          MAX(s.created_at) IS NULL 
+          ${timeFilter}
+        )
+      ORDER BY "stagnantCapital" DESC;
+    `;
+
+    try {
+      const rawItems: any[] = await this.prisma.$queryRawUnsafe(sql);
+      let totalStagnantCapital = 0;
+      let stagnantCapitalNearExpiry = 0;
+      let totalPacksCount = 0;
+      const supplierTally: Record<string, { name: string; frozenCapital: number; itemsCount: number }> = {};
+
+      const items = rawItems.map((it) => {
+        const capital = Number(it.stagnantCapital || 0);
+        const daysExpiry = it.daysUntilExpiry !== null ? Number(it.daysUntilExpiry) : 999;
+        const isNearExpiry = daysExpiry <= 90;
+
+        totalStagnantCapital += capital;
+        totalPacksCount += Number(it.packsRemaining || 0);
+
+        if (isNearExpiry) {
+          stagnantCapitalNearExpiry += capital;
+        }
+
+        const suppName = it.supplierName || 'مذخر غير محدد';
+        if (!supplierTally[suppName]) {
+          supplierTally[suppName] = { name: suppName, frozenCapital: 0, itemsCount: 0 };
+        }
+        supplierTally[suppName].frozenCapital += capital;
+        supplierTally[suppName].itemsCount += 1;
+
+        let daysSinceLastSale: number | null = null;
+        if (it.lastSoldAt) {
+          const diffMs = Date.now() - new Date(it.lastSoldAt).getTime();
+          daysSinceLastSale = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        }
+
+        return {
+          ...it,
+          stagnantCapital: capital,
+          daysUntilExpiry: daysExpiry,
+          isNearExpiry,
+          daysSinceLastSale,
+        };
+      });
+
+      const topSuppliers = Object.values(supplierTally).sort((a, b) => b.frozenCapital - a.frozenCapital);
+
+      return {
+        thresholdDays: days,
+        summary: {
+          totalStagnantItemsCount: items.length,
+          totalStagnantCapital,
+          stagnantCapitalNearExpiry,
+          totalPacksCount,
+          topSuppliers,
+        },
+        items,
+      };
+    } catch (err: any) {
+      this.logger.error(`Error calculating dead stock report: ${err.message}`);
+      return {
+        thresholdDays: days,
+        summary: {
+          totalStagnantItemsCount: 0,
+          totalStagnantCapital: 0,
+          stagnantCapitalNearExpiry: 0,
+          totalPacksCount: 0,
+          topSuppliers: [],
+        },
+        items: [],
+      };
+    }
+  }
+
+  /**
+   * Smart Stock Dynamic Sales Velocity & Depletion Prediction Report
+   * Predicts days until stockout based on real 30-day velocity and suggests reorder quantities
+   */
+  async getSmartStockPredictionReport() {
+    const schemaName = this.tenantContext.getSchemaName();
 
     const sql = `
       SELECT 
@@ -488,50 +706,115 @@ export class ReportsService {
         ii.units_per_pack as "unitsPerPack",
         ii.selling_price_pack as "sellingPricePack",
         COALESCE(SUM(b.quantity_units_remaining), 0)::int as "totalUnitsRemaining",
-        COALESCE(
-          SUM((b.quantity_units_remaining::numeric / GREATEST(ii.units_per_pack, 1)) * COALESCE(b.purchase_price_pack, 0)),
-          0
-        )::numeric as "stagnantCapital",
-        MAX(s.created_at) as "lastSoldAt"
+        COALESCE((
+          SELECT SUM(
+            CASE 
+              WHEN si.unit_type = 'PACK' THEN si.quantity
+              ELSE si.quantity::numeric / GREATEST(ii.units_per_pack, 1)
+            END
+          )
+          FROM "${schemaName}".sale_items si
+          JOIN "${schemaName}".sales s ON si.sale_id = s.id
+          WHERE si.inventory_item_id = ii.id
+            AND s.created_at >= (CURRENT_TIMESTAMP - INTERVAL '30 days')
+        ), 0)::numeric as "soldPacksLast30Days"
       FROM "${schemaName}".inventory_items ii
       JOIN public.medicines m ON ii.medicine_id = m.id
       LEFT JOIN "${schemaName}".inventory_batches b ON ii.id = b.inventory_item_id
-      LEFT JOIN "${schemaName}".sale_items si ON ii.id = si.inventory_item_id
-      LEFT JOIN "${schemaName}".sales s ON si.sale_id = s.id
       GROUP BY ii.id, m.trade_name, m.scientific_name, m.barcode, ii.units_per_pack, ii.selling_price_pack
-      HAVING 
-        COALESCE(SUM(b.quantity_units_remaining), 0) > 0
-        AND (
-          MAX(s.created_at) IS NULL 
-          OR MAX(s.created_at) < (CURRENT_TIMESTAMP - INTERVAL '${days} days')
-        )
-      ORDER BY "stagnantCapital" DESC
-      LIMIT 100;
+      ORDER BY "soldPacksLast30Days" DESC;
     `;
 
     try {
-      const items: any[] = await this.prisma.$queryRawUnsafe(sql);
-      let totalStagnantCapital = 0;
-      let totalStagnantItemsCount = items.length;
+      const rows: any[] = await this.prisma.$queryRawUnsafe(sql);
 
-      for (const it of items) {
-        totalStagnantCapital += Number(it.stagnantCapital || 0);
-      }
+      let criticalCount = 0;
+      let runningLowCount = 0;
+      let outOfStockCount = 0;
 
-      return {
-        thresholdDays: days,
-        summary: {
-          totalStagnantItemsCount,
-          totalStagnantCapital,
-        },
-        items: items || [],
+      const items = rows.map((r) => {
+        const unitsPerPack = Math.max(1, Number(r.unitsPerPack || 1));
+        const totalUnitsRemaining = Number(r.totalUnitsRemaining || 0);
+        const currentStockPacks = Number((totalUnitsRemaining / unitsPerPack).toFixed(1));
+        const soldPacksLast30Days = Number(r.soldPacksLast30Days || 0);
+        const dailySalesVelocity = Number((soldPacksLast30Days / 30).toFixed(2));
+
+        let daysLeft = 999;
+        let status: 'OUT_OF_STOCK' | 'CRITICAL' | 'RUNNING_LOW' | 'HEALTHY' | 'STAGNANT' = 'HEALTHY';
+
+        if (currentStockPacks <= 0) {
+          daysLeft = 0;
+          status = 'OUT_OF_STOCK';
+          outOfStockCount++;
+        } else if (dailySalesVelocity <= 0) {
+          daysLeft = 999;
+          status = 'STAGNANT';
+        } else {
+          daysLeft = Number((currentStockPacks / dailySalesVelocity).toFixed(1));
+          if (daysLeft <= 3.5) {
+            status = 'CRITICAL';
+            criticalCount++;
+          } else if (daysLeft <= 10) {
+            status = 'RUNNING_LOW';
+            runningLowCount++;
+          } else {
+            status = 'HEALTHY';
+          }
+        }
+
+        const suggestedReorderPacks = dailySalesVelocity > 0
+          ? Math.max(0, Math.ceil(dailySalesVelocity * 25 - currentStockPacks))
+          : (currentStockPacks <= 0 ? 20 : 0);
+
+        return {
+          inventoryItemId: r.inventoryItemId,
+          tradeName: r.tradeName,
+          scientificName: r.scientificName,
+          barcode: r.barcode,
+          unitsPerPack,
+          sellingPricePack: Number(r.sellingPricePack || 0),
+          totalUnitsRemaining,
+          currentStockPacks,
+          soldPacksLast30Days,
+          dailySalesVelocity,
+          daysLeft,
+          status,
+          suggestedReorderPacks,
+        };
+      });
+
+      // Sort with highest risk first: Out of stock -> Critical -> Running low -> Healthy
+      const statusOrder: Record<string, number> = {
+        CRITICAL: 1,
+        RUNNING_LOW: 2,
+        OUT_OF_STOCK: 3,
+        HEALTHY: 4,
+        STAGNANT: 5,
       };
-    } catch {
+
+      items.sort((a, b) => {
+        const orderDiff = (statusOrder[a.status] || 99) - (statusOrder[b.status] || 99);
+        if (orderDiff !== 0) return orderDiff;
+        return a.daysLeft - b.daysLeft;
+      });
+
       return {
-        thresholdDays: days,
-        summary: { totalStagnantItemsCount: 0, totalStagnantCapital: 0 },
+        summary: {
+          totalTrackedMedicines: items.length,
+          criticalCount,
+          runningLowCount,
+          outOfStockCount,
+          atRiskTotal: criticalCount + runningLowCount + outOfStockCount,
+        },
+        items,
+      };
+    } catch (err: any) {
+      this.logger.error(`Error calculating smart stock prediction: ${err.message}`);
+      return {
+        summary: { totalTrackedMedicines: 0, criticalCount: 0, runningLowCount: 0, outOfStockCount: 0, atRiskTotal: 0 },
         items: [],
       };
     }
   }
 }
+

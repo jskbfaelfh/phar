@@ -31,6 +31,17 @@ export class MedicinesController {
     return this.medicinesService.create(dto);
   }
 
+  @Post('ai-smart-search')
+  async aiSmartSearch(
+    @Body() body: { query: string; inStockOnly?: boolean },
+    @Param() _params: any,
+    @Query() _query: any,
+    @Body() _body: any,
+  ) {
+    // Note: Request user context is extracted via MedicinesService using TenantContext or Prisma
+    return this.medicinesService.aiSmartSearch(body.query, body.inStockOnly);
+  }
+
   @Post('seed')
   async seed() {
     return this.medicinesService.seedInitialMedicines();

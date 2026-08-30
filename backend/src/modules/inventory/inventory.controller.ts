@@ -100,6 +100,29 @@ export class InventoryController {
     return this.inventoryService.getExpiringSoonAlerts(months ? Number(months) : 3);
   }
 
+  @Get('smart-expiry-summary')
+  @Roles('OWNER')
+  async getSmartExpirySummary() {
+    return this.inventoryService.getSmartExpirySummary();
+  }
+
+  @Get('shortages-by-supplier')
+  async getShortagesBySupplier(
+    @Query('supplierId') supplierId?: string,
+    @Query('severity') severity?: string,
+  ) {
+    return this.inventoryService.getShortagesBySupplier({ supplierId, severity });
+  }
+
+  @Post('batches/:batchId/return-to-supplier')
+  @Roles('OWNER')
+  async returnBatchToSupplier(
+    @Param('batchId') batchId: string,
+    @Body() dto: any,
+  ) {
+    return this.inventoryService.returnBatchToSupplier(batchId, dto);
+  }
+
   @Get(':id/batches')
   async getItemBatches(@Param('id') id: string) {
     return this.inventoryService.getItemBatches(id);

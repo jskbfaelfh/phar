@@ -8,12 +8,14 @@ import {
   Clock,
   User,
   TrendingDown,
+  Brain,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 
 export const OwnerMobileDashboardView: React.FC = () => {
   const [dailySummary, setDailySummary] = useState<any | null>(null);
   const [netProfitData, setNetProfitData] = useState<any | null>(null);
+  const [forecastData, setForecastData] = useState<any | null>(null);
   const [recentSales, setRecentSales] = useState<any[]>([]);
   const [lowStockCount, setLowStockCount] = useState<number>(0);
   const [expiringCount, setExpiringCount] = useState<number>(0);
@@ -23,12 +25,13 @@ export const OwnerMobileDashboardView: React.FC = () => {
     setRefreshing(true);
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const [summary, profit, sales, lowStock, expiring] = await Promise.all([
+      const [summary, profit, sales, lowStock, expiring, forecast] = await Promise.all([
         apiRequest<any>('/pos/daily-summary').catch(() => null),
         apiRequest<any>(`/reports/net-profit?from=${today}&to=${today}`).catch(() => null),
         apiRequest<any[]>('/pos/sales?limit=8').catch(() => []),
         apiRequest<any[]>('/inventory/low-stock').catch(() => []),
         apiRequest<any[]>('/inventory/expiring-soon').catch(() => []),
+        apiRequest<any>('/reports/smart-stock-forecast').catch(() => null),
       ]);
 
       setDailySummary(summary);
@@ -36,6 +39,7 @@ export const OwnerMobileDashboardView: React.FC = () => {
       setRecentSales(sales || []);
       setLowStockCount(lowStock?.length || 0);
       setExpiringCount(expiring?.length || 0);
+      setForecastData(forecast);
     } catch (err) {
       console.error(err);
     } finally {
@@ -136,6 +140,52 @@ export const OwnerMobileDashboardView: React.FC = () => {
           <div className="text-[10px] text-slate-400">رواتب ونثريات اليوم</div>
         </div>
       </div>
+
+      {/* Smart Runout Depletion Forecast Widget */}
+      {forecastData?.summary?.atRiskTotal > 0 && (
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-4 space-y-3 shadow-lg border border-slate-800">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+            <div className="text-xs font-black flex items-center gap-1.5 text-indigo-300">
+              <Brain className="w-4 h-4 text-amber-300 animate-pulse" />
+              <span>التنبؤ بالنقص ومعدل الاستهلاك 🧠</span>
+            </div>
+            <span className="text-[10px] font-bold px-2 py-0.5 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-full">
+              {forecastData.summary.criticalCount} حرجة
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            {(forecastData.items || [])
+              .filter((it: any) => it.status === 'CRITICAL' || it.status === 'RUNNING_LOW')
+              .slice(0, 3)
+              .map((it: any) => (
+                <div
+                  key={it.inventoryItemId}
+                  className="bg-slate-800/80 p-2.5 rounded-2xl flex items-center justify-between gap-2 border border-slate-700/60 text-xs"
+                >
+                  <div className="truncate">
+                    <div className="font-bold text-white truncate">{it.tradeName}</div>
+                    <div className="text-[10px] text-slate-400 font-mono">
+                      رصيد: {it.currentStockPacks} علبة • بيع: {it.dailySalesVelocity}/يوم
+                    </div>
+                  </div>
+
+                  <div className="text-left shrink-0">
+                    <span
+                      className={`px-2 py-1 rounded-xl text-[10px] font-black ${
+                        it.status === 'CRITICAL'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse'
+                          : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      }`}
+                    >
+                      ⚠️ ينفد خلال {it.daysLeft} يوم
+                    </span>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
 
       {/* Stock Alerts Notice Bar */}
       {(lowStockCount > 0 || expiringCount > 0) && (

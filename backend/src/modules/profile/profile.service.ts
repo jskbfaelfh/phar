@@ -82,6 +82,7 @@ export class ProfileService {
         showPhoneNumber: (tenant as any).showPhoneNumber ?? true,
         showWhatsapp: (tenant as any).showWhatsapp ?? true,
         is24Hours: (tenant as any).is24Hours ?? false,
+        geminiApiKey: (tenant as any).geminiApiKey || '',
         licenseKey: tenant.licenseKey,
         subscriptionStatus: tenant.subscriptionStatus,
         subscriptionEndsAt: tenant.subscriptionEndsAt,
@@ -113,6 +114,7 @@ export class ProfileService {
     if (dto.showPhoneNumber !== undefined) updateData.showPhoneNumber = dto.showPhoneNumber;
     if (dto.showWhatsapp !== undefined) updateData.showWhatsapp = dto.showWhatsapp;
     if (dto.is24Hours !== undefined) updateData.is24Hours = dto.is24Hours;
+    if (dto.geminiApiKey !== undefined) updateData.geminiApiKey = dto.geminiApiKey?.trim() || null;
 
     const updated = await this.prisma.tenant.update({
       where: { id: tenantId },

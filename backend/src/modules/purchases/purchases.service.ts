@@ -1,10 +1,120 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
 
 @Injectable()
 export class PurchasesService {
+  private static readonly verifiedSchemas = new Set<string>();
+
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Helper to ensure all tables exist in the tenant schema
+   */
+  private async ensureTablesExist(schemaName: string) {
+    if (PurchasesService.verifiedSchemas.has(schemaName)) {
+      return;
+    }
+
+    const statements = [
+      `ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS custom_name VARCHAR(255);`,
+      `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS supplier_id UUID;`,
+      `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS purchase_id UUID;`,
+      `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS is_recalled BOOLEAN DEFAULT FALSE;`,
+      `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_pack DECIMAL(12, 2);`,
+      `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_unit DECIMAL(12, 2);`,
+      `ALTER TABLE "${schemaName}".purchase_invoice_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();`,
+      `CREATE TABLE IF NOT EXISTS "${schemaName}".suppliers (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(255) NOT NULL,
+        phone VARCHAR(50),
+        address TEXT,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );`,
+      `CREATE TABLE IF NOT EXISTS "${schemaName}".purchases (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        invoice_number VARCHAR(100),
+        supplier_id UUID,
+        supplier_name VARCHAR(255),
+        total_gross_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+        total_discount_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+        net_total_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+        paid_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+        remaining_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+        payment_status VARCHAR(20) NOT NULL DEFAULT 'PAID',
+        due_date DATE,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );`,
+      `CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        purchase_id UUID,
+        inventory_item_id UUID,
+        quantity_packs INT NOT NULL,
+        bonus_packs INT NOT NULL DEFAULT 0,
+        units_per_pack INT NOT NULL DEFAULT 1,
+        purchase_price_pack DECIMAL(12, 2) NOT NULL,
+        discount_percent DECIMAL(5, 2) NOT NULL DEFAULT 0,
+        net_cost_pack DECIMAL(12, 2) NOT NULL,
+        selling_price_pack DECIMAL(12, 2) NOT NULL,
+        selling_price_unit DECIMAL(12, 2) NOT NULL,
+        expiry_date DATE,
+        batch_number VARCHAR(100)
+      );`,
+      `CREATE TABLE IF NOT EXISTS "${schemaName}".supplier_payments (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        supplier_id UUID,
+        purchase_id UUID,
+        amount DECIMAL(12, 2) NOT NULL,
+        payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        payment_method VARCHAR(50) DEFAULT 'CASH',
+        receipt_number VARCHAR(100),
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );`,
+      `CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_invoices (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        invoice_number VARCHAR(100) NOT NULL,
+        supplier_id UUID,
+        supplier_name VARCHAR(255),
+        invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        total_amount DECIMAL(12, 2) NOT NULL,
+        paid_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+        remaining_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+        notes TEXT,
+        items_count INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );`,
+      `CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_invoice_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        purchase_invoice_id UUID,
+        medicine_id UUID,
+        trade_name VARCHAR(255) NOT NULL,
+        scientific_name VARCHAR(255),
+        batch_number VARCHAR(100),
+        expiry_date DATE NOT NULL,
+        quantity_packs INT NOT NULL,
+        units_per_pack INT NOT NULL DEFAULT 1,
+        purchase_price_pack DECIMAL(12, 2) NOT NULL,
+        selling_price_pack DECIMAL(12, 2) NOT NULL,
+        total_cost DECIMAL(12, 2) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );`
+    ];
+
+    for (const statement of statements) {
+      try {
+        await this.prisma.$executeRawUnsafe(statement);
+      } catch (err) {
+        // Continue if statement already applied
+      }
+    }
+
+    PurchasesService.verifiedSchemas.add(schemaName);
+  }
 
   /**
    * Record a new purchase invoice from a supplier/warehouse into tenant schema
@@ -16,24 +126,75 @@ export class PurchasesService {
     }
 
     const schema = tenant.schemaName;
-    const paidAmount = dto.paidAmount || 0;
-    const remainingAmount = Math.max(0, dto.totalAmount - paidAmount);
-    const invoiceDate = dto.invoiceDate ? new Date(dto.invoiceDate) : new Date();
+    await this.ensureTablesExist(schema);
 
-    // 1. Insert Purchase Invoice Header
+    const paidAmount = Number(dto.paidAmount) || 0;
+    const totalAmount = Number(dto.totalAmount) || 0;
+    const remainingAmount = Math.max(0, totalAmount - paidAmount);
+    const invoiceDate = dto.invoiceDate ? new Date(dto.invoiceDate) : new Date();
+    const invoiceNumber = (dto.invoiceNumber || `INV-${Date.now().toString().slice(-6)}`).trim();
+
+    // Auto-resolve or create Supplier in tenant schema
+    let finalSupplierId = dto.supplierId || null;
+    const supplierName = (dto.supplierName || 'مذخر أدوية').trim();
+
+    if (!finalSupplierId && supplierName) {
+      const existingSupp: any[] = await this.prisma.$queryRawUnsafe(`
+        SELECT id FROM "${schema}"."suppliers" WHERE LOWER(name) = LOWER($1) LIMIT 1;
+      `, supplierName);
+
+      if (existingSupp.length > 0) {
+        finalSupplierId = existingSupp[0].id;
+      } else {
+        const createdSupp: any[] = await this.prisma.$queryRawUnsafe(`
+          INSERT INTO "${schema}"."suppliers" ("name")
+          VALUES ($1)
+          RETURNING id;
+        `, supplierName);
+        finalSupplierId = createdSupp[0].id;
+      }
+    }
+
+    const purchaseId = crypto.randomUUID();
+    const paymentStatus = remainingAmount === 0 ? 'PAID' : (paidAmount > 0 ? 'PARTIAL' : 'UNPAID');
+
+    // 1. Insert into purchases table (standard unified system)
+    await this.prisma.$executeRawUnsafe(`
+      INSERT INTO "${schema}"."purchases" (
+        "id", "invoice_number", "supplier_id", "supplier_name",
+        "total_gross_amount", "total_discount_amount", "net_total_amount",
+        "paid_amount", "remaining_amount", "payment_status", "notes", "created_at"
+      ) VALUES (
+        $1::uuid, $2, $3::uuid, $4, $5, 0, $5, $6, $7, $8, $9, $10
+      );
+    `,
+      purchaseId,
+      invoiceNumber,
+      finalSupplierId,
+      supplierName,
+      totalAmount,
+      paidAmount,
+      remainingAmount,
+      paymentStatus,
+      dto.notes || null,
+      invoiceDate
+    );
+
+    // 2. Insert into purchase_invoices table for multi-view compatibility
     const invoiceInsert = await this.prisma.$queryRawUnsafe<Array<{ id: string }>>(`
       INSERT INTO "${schema}"."purchase_invoices" (
-        "invoice_number", "supplier_id", "supplier_name", "invoice_date",
+        "id", "invoice_number", "supplier_id", "supplier_name", "invoice_date",
         "total_amount", "paid_amount", "remaining_amount", "notes", "items_count"
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9
+        $1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10
       ) RETURNING id;
     `,
-      dto.invoiceNumber,
-      dto.supplierId || null,
-      dto.supplierName || null,
+      purchaseId,
+      invoiceNumber,
+      finalSupplierId,
+      supplierName,
       invoiceDate,
-      dto.totalAmount,
+      totalAmount,
       paidAmount,
       remainingAmount,
       dto.notes || null,
@@ -42,181 +203,232 @@ export class PurchasesService {
 
     const invoiceId = invoiceInsert[0].id;
 
-    // 2. Insert items and update inventory
+    // 3. Process items, create medicines if needed, update inventory items & insert batches
     for (const item of dto.items) {
-      const totalCost = item.quantityPacks * item.purchasePricePack;
+      const quantityPacks = Number(item.quantityPacks) || 1;
+      const purchasePricePack = Number(item.purchasePricePack) || 0;
+      const sellingPricePack = Number(item.sellingPricePack) || Math.round((purchasePricePack * 1.25) / 250) * 250;
+      const unitsPerPack = Number(item.unitsPerPack) || 1;
+      const totalCost = quantityPacks * purchasePricePack;
       const expiryDate = new Date(item.expiryDate);
-      const unitsPerPack = item.unitsPerPack || 1;
-      const totalUnits = item.quantityPacks * unitsPerPack;
-      const sellingPriceUnit = unitsPerPack > 0 ? item.sellingPricePack / unitsPerPack : item.sellingPricePack;
+      const totalUnits = Math.round(quantityPacks * unitsPerPack);
+      const sellingPriceUnit = unitsPerPack > 0 ? sellingPricePack / unitsPerPack : sellingPricePack;
+      const finalTradeName = (item.customTradeName || item.tradeName || 'دواء جديد').trim();
 
-      // Insert Purchase Invoice Item
+      // Ensure medicine exists in public.medicines
+      let medicineId = item.medicineId;
+      if (!medicineId) {
+        const existingMed: any[] = await this.prisma.$queryRawUnsafe(`
+          SELECT id FROM public.medicines 
+          WHERE trade_name ILIKE $1 OR (barcode IS NOT NULL AND barcode = $2)
+          LIMIT 1;
+        `, finalTradeName, item.barcode || '__NO_BARCODE__');
+
+        if (existingMed.length > 0) {
+          medicineId = existingMed[0].id;
+        } else {
+          const createdMed: any[] = await this.prisma.$queryRawUnsafe(`
+            INSERT INTO public.medicines (
+              "id", "trade_name", "scientific_name", "barcode", "default_units_per_pack", "is_verified"
+            ) VALUES (
+              gen_random_uuid(), $1, $2, $3, $4, true
+            ) RETURNING id;
+          `,
+            finalTradeName,
+            item.scientificName || finalTradeName,
+            item.barcode || null,
+            unitsPerPack
+          );
+          medicineId = createdMed[0].id;
+        }
+      }
+
+      // Find or create InventoryItem in Tenant schema
+      let inventoryItem = (
+        await this.prisma.$queryRawUnsafe<Array<{ id: string }>>(`
+          SELECT id FROM "${schema}"."inventory_items" WHERE "medicine_id" = $1::uuid LIMIT 1;
+        `, medicineId)
+      )[0];
+
+      let inventoryItemId: string;
+
+      if (!inventoryItem) {
+        const createdInv = await this.prisma.$queryRawUnsafe<Array<{ id: string }>>(`
+          INSERT INTO "${schema}"."inventory_items" (
+            "medicine_id", "custom_name", "units_per_pack", "selling_price_pack", "selling_price_unit", "min_alert_units", "is_public_visible"
+          ) VALUES (
+            $1::uuid, $2, $3, $4, $5, 5, true
+          ) RETURNING id;
+        `, medicineId, finalTradeName, unitsPerPack, sellingPricePack, sellingPriceUnit);
+        inventoryItemId = createdInv[0].id;
+      } else {
+        inventoryItemId = inventoryItem.id;
+        // Update price
+        await this.prisma.$executeRawUnsafe(`
+          UPDATE "${schema}"."inventory_items"
+          SET "selling_price_pack" = $1, "selling_price_unit" = $2, "custom_name" = COALESCE($3, "custom_name"), "updated_at" = CURRENT_TIMESTAMP
+          WHERE "id" = $4::uuid;
+        `, sellingPricePack, sellingPriceUnit, finalTradeName, inventoryItemId);
+      }
+
+      // Insert into purchase_items
+      await this.prisma.$executeRawUnsafe(`
+        INSERT INTO "${schema}"."purchase_items" (
+          "purchase_id", "inventory_item_id", "quantity_packs", "bonus_packs", "units_per_pack",
+          "purchase_price_pack", "discount_percent", "net_cost_pack", "selling_price_pack", "selling_price_unit",
+          "expiry_date", "batch_number"
+        ) VALUES (
+          $1::uuid, $2::uuid, $3, 0, $4, $5, 0, $5, $6, $7, $8, $9
+        );
+      `,
+        purchaseId,
+        inventoryItemId,
+        quantityPacks,
+        unitsPerPack,
+        purchasePricePack,
+        sellingPricePack,
+        sellingPriceUnit,
+        expiryDate,
+        item.batchNumber || `BN-${Date.now().toString().slice(-4)}`
+      );
+
+      // Insert into purchase_invoice_items
       await this.prisma.$executeRawUnsafe(`
         INSERT INTO "${schema}"."purchase_invoice_items" (
           "purchase_invoice_id", "medicine_id", "trade_name", "scientific_name",
           "batch_number", "expiry_date", "quantity_packs", "units_per_pack",
           "purchase_price_pack", "selling_price_pack", "total_cost"
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+          $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11
         );
       `,
         invoiceId,
-        item.medicineId,
-        item.tradeName,
+        medicineId,
+        finalTradeName,
         item.scientificName || null,
-        item.batchNumber || null,
+        item.batchNumber || `BN-${Date.now().toString().slice(-4)}`,
         expiryDate,
-        item.quantityPacks,
+        quantityPacks,
         unitsPerPack,
-        item.purchasePricePack,
-        item.sellingPricePack,
+        purchasePricePack,
+        sellingPricePack,
         totalCost
       );
-
-      // Find or create InventoryItem
-      let inventoryItem = (
-        await this.prisma.$queryRawUnsafe<Array<{ id: string }>>(`
-          SELECT id FROM "${schema}"."inventory_items" WHERE "medicine_id" = $1 LIMIT 1;
-        `, item.medicineId)
-      )[0];
-
-      if (!inventoryItem) {
-        const createdInv = await this.prisma.$queryRawUnsafe<Array<{ id: string }>>(`
-          INSERT INTO "${schema}"."inventory_items" (
-            "medicine_id", "units_per_pack", "selling_price_pack", "selling_price_unit", "min_alert_units", "is_public_visible"
-          ) VALUES (
-            $1, $2, $3, $4, 5, true
-          ) RETURNING id;
-        `, item.medicineId, unitsPerPack, item.sellingPricePack, sellingPriceUnit);
-        inventoryItem = createdInv[0];
-      } else {
-        // Update price
-        await this.prisma.$executeRawUnsafe(`
-          UPDATE "${schema}"."inventory_items"
-          SET "selling_price_pack" = $1, "selling_price_unit" = $2, "updated_at" = CURRENT_TIMESTAMP
-          WHERE "id" = $3;
-        `, item.sellingPricePack, sellingPriceUnit, inventoryItem.id);
-      }
 
       // Add Batch to Inventory
       await this.prisma.$executeRawUnsafe(`
         INSERT INTO "${schema}"."inventory_batches" (
-          "inventory_item_id", "batch_number", "purchase_price_pack", "quantity_units_remaining", "expiry_date"
+          "inventory_item_id", "supplier_id", "purchase_id", "batch_number", "purchase_price_pack",
+          "selling_price_pack", "selling_price_unit", "quantity_units_remaining", "expiry_date", "is_recalled"
         ) VALUES (
-          $1, $2, $3, $4, $5
+          $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, FALSE
         );
       `,
-        inventoryItem.id,
-        item.batchNumber || null,
-        item.purchasePricePack,
+        inventoryItemId,
+        finalSupplierId,
+        purchaseId,
+        item.batchNumber || `BN-${Date.now().toString().slice(-4)}`,
+        purchasePricePack,
+        sellingPricePack,
+        sellingPriceUnit,
         totalUnits,
         expiryDate
       );
     }
 
-    // 3. Update Supplier Ledger if supplier specified
-    if (dto.supplierId) {
+    // 4. Record payment in supplier_payments if paidAmount > 0
+    if (paidAmount > 0 && finalSupplierId) {
       await this.prisma.$executeRawUnsafe(`
-        UPDATE "${schema}"."suppliers"
-        SET "current_balance" = "current_balance" + $1, "updated_at" = CURRENT_TIMESTAMP
-        WHERE "id" = $2;
-      `, remainingAmount, dto.supplierId);
-
-      await this.prisma.$executeRawUnsafe(`
-        INSERT INTO "${schema}"."supplier_transactions" (
-          "supplier_id", "type", "amount", "notes"
+        INSERT INTO "${schema}"."supplier_payments" (
+          "supplier_id", "purchase_id", "amount", "payment_date", "payment_method", "receipt_number", "notes"
         ) VALUES (
-          $1, 'INVOICE', $2, $3
+          $1::uuid, $2::uuid, $3, $4, 'CASH', $5, $6
         );
       `,
-        dto.supplierId,
-        dto.totalAmount,
-        `فاتورة شراء رقم ${dto.invoiceNumber}`
+        finalSupplierId,
+        purchaseId,
+        paidAmount,
+        invoiceDate,
+        invoiceNumber,
+        `دفعة مسددة عند استلام فاتورة ${invoiceNumber}`
       );
-
-      if (paidAmount > 0) {
-        await this.prisma.$executeRawUnsafe(`
-          INSERT INTO "${schema}"."supplier_transactions" (
-            "supplier_id", "type", "amount", "notes"
-          ) VALUES (
-            $1, 'PAYMENT', $2, $3
-          );
-        `,
-          dto.supplierId,
-          paidAmount,
-          `دفعة مسددة عند استلام فاتورة ${dto.invoiceNumber}`
-        );
-      }
     }
 
     return {
-      message: 'تم تسجيل فاتورة الشراء وتحديث المخزون بنجاح',
+      message: 'تم تسجيل فاتورة الشراء وتحديث المخزون والوجبات بنجاح',
       invoiceId,
-      invoiceNumber: dto.invoiceNumber,
-      totalAmount: dto.totalAmount,
+      invoiceNumber,
+      totalAmount,
       itemsCount: dto.items.length,
     };
   }
 
   /**
-   * Get all purchase invoices in tenant schema
+   * Get purchase invoices history with supplier details and items summary
    */
   async getPurchases(tenantId: string, search?: string) {
     const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
-    if (!tenant || !tenant.schemaName) return [];
-
-    const schema = tenant.schemaName;
-    let query = `
-      SELECT 
-        id,
-        invoice_number as "invoiceNumber",
-        supplier_id as "supplierId",
-        supplier_name as "supplierName",
-        invoice_date as "invoiceDate",
-        total_amount as "totalAmount",
-        paid_amount as "paidAmount",
-        remaining_amount as "remainingAmount",
-        notes,
-        items_count as "itemsCount",
-        created_at as "createdAt"
-      FROM "${schema}"."purchase_invoices"
-    `;
-
-    if (search && search.trim()) {
-      query += ` WHERE invoice_number ILIKE '%${search.trim()}%' OR supplier_name ILIKE '%${search.trim()}%'`;
+    if (!tenant || !tenant.schemaName) {
+      throw new BadRequestException('الصيدلية غير متوفرة');
     }
 
-    query += ` ORDER BY invoice_date DESC, created_at DESC LIMIT 100;`;
+    const schema = tenant.schemaName;
+    await this.ensureTablesExist(schema);
 
-    return this.prisma.$queryRawUnsafe(query);
+    let query = `
+      SELECT 
+        pi.id,
+        pi.invoice_number as "invoiceNumber",
+        pi.supplier_id as "supplierId",
+        pi.supplier_name as "supplierName",
+        pi.invoice_date as "invoiceDate",
+        pi.total_amount as "totalAmount",
+        pi.paid_amount as "paidAmount",
+        pi.remaining_amount as "remainingAmount",
+        pi.notes,
+        pi.items_count as "itemsCount",
+        pi.created_at as "createdAt"
+      FROM "${schema}"."purchase_invoices" pi
+    `;
+
+    const params: any[] = [];
+    if (search && search.trim()) {
+      query += ` WHERE pi.invoice_number ILIKE $1 OR pi.supplier_name ILIKE $1`;
+      params.push(`%${search.trim()}%`);
+    }
+
+    query += ` ORDER BY pi.created_at DESC LIMIT 100;`;
+
+    return this.prisma.$queryRawUnsafe(query, ...params);
   }
 
   /**
-   * Get single purchase invoice with items
+   * Get single purchase invoice details including all items
    */
   async getPurchaseById(tenantId: string, id: string) {
     const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant || !tenant.schemaName) {
-      throw new NotFoundException('الصيدلية غير متوفرة');
+      throw new BadRequestException('الصيدلية غير متوفرة');
     }
 
     const schema = tenant.schemaName;
+    await this.ensureTablesExist(schema);
 
     const invoices = await this.prisma.$queryRawUnsafe<any[]>(`
       SELECT 
-        id,
-        invoice_number as "invoiceNumber",
-        supplier_id as "supplierId",
-        supplier_name as "supplierName",
-        invoice_date as "invoiceDate",
-        total_amount as "totalAmount",
-        paid_amount as "paidAmount",
-        remaining_amount as "remainingAmount",
-        notes,
-        items_count as "itemsCount",
-        created_at as "createdAt"
-      FROM "${schema}"."purchase_invoices"
-      WHERE id = $1 LIMIT 1;
+        pi.id,
+        pi.invoice_number as "invoiceNumber",
+        pi.supplier_id as "supplierId",
+        pi.supplier_name as "supplierName",
+        pi.invoice_date as "invoiceDate",
+        pi.total_amount as "totalAmount",
+        pi.paid_amount as "paidAmount",
+        pi.remaining_amount as "remainingAmount",
+        pi.notes,
+        pi.items_count as "itemsCount",
+        pi.created_at as "createdAt"
+      FROM "${schema}"."purchase_invoices" pi
+      WHERE pi.id = $1::uuid;
     `, id);
 
     if (!invoices || invoices.length === 0) {
@@ -227,24 +439,25 @@ export class PurchasesService {
 
     const items = await this.prisma.$queryRawUnsafe<any[]>(`
       SELECT 
-        id,
-        medicine_id as "medicineId",
-        trade_name as "tradeName",
-        scientific_name as "scientificName",
-        batch_number as "batchNumber",
-        expiry_date as "expiryDate",
-        quantity_packs as "quantityPacks",
-        units_per_pack as "unitsPerPack",
-        purchase_price_pack as "purchasePricePack",
-        selling_price_pack as "sellingPricePack",
-        total_cost as "totalCost"
-      FROM "${schema}"."purchase_invoice_items"
-      WHERE purchase_invoice_id = $1;
+        pii.id,
+        pii.medicine_id as "medicineId",
+        pii.trade_name as "tradeName",
+        pii.scientific_name as "scientificName",
+        pii.batch_number as "batchNumber",
+        pii.expiry_date as "expiryDate",
+        pii.quantity_packs as "quantityPacks",
+        pii.units_per_pack as "unitsPerPack",
+        pii.purchase_price_pack as "purchasePricePack",
+        pii.selling_price_pack as "sellingPricePack",
+        pii.total_cost as "totalCost"
+      FROM "${schema}"."purchase_invoice_items" pii
+      WHERE pii.purchase_invoice_id = $1::uuid
+      ORDER BY pii.trade_name ASC;
     `, id);
 
     return {
       ...invoice,
-      items: items || [],
+      items,
     };
   }
 }

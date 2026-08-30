@@ -51,4 +51,9 @@ export class ReportsController {
   async getDeadStockReport(@Query('days') days?: number) {
     return this.reportsService.getDeadStockReport(days ? Number(days) : 60);
   }
+
+  @Get('smart-stock-forecast')
+  async getSmartStockPredictionReport() {
+    return this.reportsService.getSmartStockPredictionReport();
+  }
 }
