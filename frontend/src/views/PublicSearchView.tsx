@@ -149,7 +149,7 @@ export const PublicSearchView: React.FC = () => {
   useEffect(() => {
     apiRequest<any[]>('/public/locations')
       .then((data) => setLocations(data || []))
-      .catch((err) => console.error(err));
+      .catch(() => {});
 
     apiRequest<any>('/public/stats')
       .then((data) => {
@@ -157,7 +157,7 @@ export const PublicSearchView: React.FC = () => {
           setStats(data);
         }
       })
-      .catch((err) => console.error(err));
+      .catch(() => {});
   }, []);
 
 const IRAQ_COORDINATES: Record<string, { lat: number; lng: number }> = {

@@ -68,7 +68,14 @@ export const App: React.FC = () => {
   const [branches, setBranches] = useState<any[]>(getStoredBranches());
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState<boolean>(false);
   const [isSwitchingBranch, setIsSwitchingBranch] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('PUBLIC_SEARCH');
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+    const token = getAuthToken();
+    const user = getStoredUser();
+    if (token && user) {
+      return user.role === 'SUPER_ADMIN' ? 'ADMIN' : 'POS';
+    }
+    return 'PUBLIC_SEARCH';
+  });
 
   // Sidebar collapsible state (persisted)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -89,18 +96,6 @@ export const App: React.FC = () => {
       return next;
     });
   };
-
-  // If token exists on first load, switch to POS or Admin
-  useEffect(() => {
-    const token = getAuthToken();
-    if (token && currentUser) {
-      if (currentUser.role === 'SUPER_ADMIN') {
-        setActiveTab('ADMIN');
-      } else {
-        setActiveTab('POS');
-      }
-    }
-  }, []);
 
   // Proactive alert check on startup
   useEffect(() => {
