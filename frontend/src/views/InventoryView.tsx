@@ -16,6 +16,7 @@ import {
   Mic,
   Sparkles,
   MapPin,
+  Plus,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { usePharmacyLiveSync } from '../hooks/usePharmacyLiveSync';
@@ -23,6 +24,7 @@ import { BarcodeGeneratorModal } from '../components/BarcodeGeneratorModal';
 import { BatchTraceabilityModal } from '../components/BatchTraceabilityModal';
 import { SupplierReturnModal } from '../components/SupplierReturnModal';
 import { SmartSearchModal } from '../components/SmartSearchModal';
+import { AddUnregisteredMedicineModal } from '../components/AddUnregisteredMedicineModal';
 import {
   getLocalInventory,
   saveLocalInventoryBulk,
@@ -55,6 +57,7 @@ export const InventoryView: React.FC = () => {
   const [returnBatchItem, setReturnBatchItem] = useState<any | null>(null);
   const [showSmartSearch, setShowSmartSearch] = useState(false);
   const [smartSearchAutoVoice, setSmartSearchAutoVoice] = useState(false);
+  const [showAddMedModal, setShowAddMedModal] = useState(false);
 
   // Edit price & unit settings modal state
   const [editingItem, setEditingItem] = useState<any | null>(null);
@@ -465,6 +468,17 @@ export const InventoryView: React.FC = () => {
               >
                 <Sparkles className="w-4 h-4 text-indigo-600" />
                 <span className="hidden md:inline">مساعد ذكي 🧠</span>
+              </button>
+
+              {/* Add New Unregistered Medicine Button */}
+              <button
+                type="button"
+                onClick={() => setShowAddMedModal(true)}
+                className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 shadow-xs"
+                title="تسجيل دواء جديد غير موجود في الدليل الموحد"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">تسجيل دواء جديد ➕</span>
               </button>
             </div>
 
@@ -1337,6 +1351,22 @@ export const InventoryView: React.FC = () => {
         <SmartSearchModal
           autoStartVoice={smartSearchAutoVoice}
           onClose={() => setShowSmartSearch(false)}
+        />
+      )}
+
+      {/* 7. Add Unregistered Medicine Modal */}
+      {showAddMedModal && (
+        <AddUnregisteredMedicineModal
+          initialSearch={searchTerm}
+          onClose={() => setShowAddMedModal(false)}
+          onSuccess={(newMed) => {
+            setMessage({
+              type: 'success',
+              text: `تم تسجيل (${newMed.tradeName}) بنجاح! يمكنك الآن إدخال وجبته وأسعاره من صفحة المشتريات`,
+            });
+            fetchInventory();
+            fetchSummaryCounts();
+          }}
         />
       )}
     </div>

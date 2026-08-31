@@ -16,6 +16,11 @@ import { CreateMedicineDto, QueryMedicineDto } from './dto/create-medicine.dto';
 export class MedicinesController {
   constructor(private readonly medicinesService: MedicinesService) {}
 
+  @Get('unverified')
+  async getUnverified(@Query('search') search?: string) {
+    return this.medicinesService.getUnverified(search);
+  }
+
   @Get('search')
   async search(@Query() query: QueryMedicineDto) {
     return this.medicinesService.search(query);
@@ -29,6 +34,19 @@ export class MedicinesController {
   @Post()
   async create(@Body() dto: CreateMedicineDto) {
     return this.medicinesService.create(dto);
+  }
+
+  @Post(':id/verify')
+  async verifyMedicine(
+    @Param('id') id: string,
+    @Body() body?: Partial<CreateMedicineDto>,
+  ) {
+    return this.medicinesService.verifyMedicine(id, body);
+  }
+
+  @Post('delete-medicine/:id')
+  async deleteMedicine(@Param('id') id: string) {
+    return this.medicinesService.deleteMedicine(id);
   }
 
   @Post('ai-smart-search')

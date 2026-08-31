@@ -74,11 +74,92 @@ export class MedicinesService {
         manufacturer: dto.manufacturer,
         barcode: dto.barcode,
         defaultUnitsPerPack: dto.defaultUnitsPerPack || 1,
-        isVerified: dto.isVerified !== undefined ? dto.isVerified : true,
+        isVerified: dto.isVerified !== undefined ? dto.isVerified : false,
       },
     });
 
     return medicine;
+  }
+
+  /**
+   * Get list of unverified medicines submitted by pharmacies
+   */
+  async getUnverified(search?: string) {
+    const where: any = { isVerified: false };
+    if (search && search.trim().length > 0) {
+      const q = search.trim();
+      where.OR = [
+        { tradeName: { contains: q, mode: 'insensitive' } },
+        { scientificName: { contains: q, mode: 'insensitive' } },
+        { barcode: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    const items = await this.prisma.medicine.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    const totalUnverified = await this.prisma.medicine.count({
+      where: { isVerified: false },
+    });
+
+    const totalVerified = await this.prisma.medicine.count({
+      where: { isVerified: true },
+    });
+
+    return {
+      items,
+      totalUnverified,
+      totalVerified,
+    };
+  }
+
+  /**
+   * SuperAdmin approves/verifies a medicine into the global catalog
+   */
+  async verifyMedicine(id: string, updates?: Partial<CreateMedicineDto>) {
+    const existing = await this.prisma.medicine.findUnique({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException('الدواء غير موجود');
+    }
+
+    const updated = await this.prisma.medicine.update({
+      where: { id },
+      data: {
+        isVerified: true,
+        ...(updates?.tradeName ? { tradeName: updates.tradeName } : {}),
+        ...(updates?.scientificName ? { scientificName: updates.scientificName } : {}),
+        ...(updates?.dosageForm ? { dosageForm: updates.dosageForm } : {}),
+        ...(updates?.strength ? { strength: updates.strength } : {}),
+        ...(updates?.manufacturer ? { manufacturer: updates.manufacturer } : {}),
+        ...(updates?.defaultUnitsPerPack ? { defaultUnitsPerPack: updates.defaultUnitsPerPack } : {}),
+      },
+    });
+
+    return {
+      success: true,
+      message: `تم اعتماد الدواء "${updated.tradeName}" رسمياً في الدليل الموحد`,
+      medicine: updated,
+    };
+  }
+
+  /**
+   * SuperAdmin rejects/deletes a medicine
+   */
+  async deleteMedicine(id: string) {
+    const existing = await this.prisma.medicine.findUnique({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException('الدواء غير موجود');
+    }
+
+    await this.prisma.medicine.delete({ where: { id } });
+
+    return {
+      success: true,
+      message: 'تم حذف الدواء بنجاح',
+    };
   }
 
   /**

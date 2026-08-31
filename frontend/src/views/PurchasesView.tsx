@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { SmartInvoiceScannerModal } from '../components/SmartInvoiceScannerModal';
+import { AddUnregisteredMedicineModal } from '../components/AddUnregisteredMedicineModal';
 
 interface PurchaseInvoiceItem {
   id?: string;
@@ -55,6 +56,7 @@ export const PurchasesView: React.FC = () => {
   const [selectedInvoice, setSelectedInvoice] = useState<PurchaseInvoice | null>(null);
   const [showNewModal, setShowNewModal] = useState(false);
   const [showAiScanModal, setShowAiScanModal] = useState(false);
+  const [showAddMedModal, setShowAddMedModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -582,7 +584,17 @@ export const PurchasesView: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 text-xs">
                   {/* Medicine Search */}
                   <div className="sm:col-span-2 relative">
-                    <label className="block font-bold text-slate-700 mb-1">اسم الدواء *</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-bold text-slate-700">اسم الدواء *</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddMedModal(true)}
+                        className="text-[11px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>تسجيل دواء جديد</span>
+                      </button>
+                    </div>
                     <input
                       type="text"
                       value={itemSearch}
@@ -593,18 +605,37 @@ export const PurchasesView: React.FC = () => {
                       placeholder="ابحث بالاسم أو الباركود..."
                       className="w-full p-2 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 focus:outline-hidden focus:border-blue-500"
                     />
-                    {filteredMedicines.length > 0 && (
+                    {itemSearch.trim().length >= 2 && (
                       <div className="absolute top-full right-0 left-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto">
-                        {filteredMedicines.map((m) => (
-                          <div
-                            key={m.id}
-                            onClick={() => handleSelectMed(m)}
-                            className="p-2.5 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0"
-                          >
-                            <div className="font-bold text-slate-900">{m.tradeName}</div>
-                            <div className="text-[10px] text-slate-400">{m.scientificName}</div>
+                        {filteredMedicines.length > 0 ? (
+                          filteredMedicines.map((m) => (
+                            <div
+                              key={m.id}
+                              onClick={() => handleSelectMed(m)}
+                              className="p-2.5 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0 flex items-center justify-between"
+                            >
+                              <div>
+                                <div className="font-bold text-slate-900">{m.tradeName}</div>
+                                <div className="text-[10px] text-slate-400">{m.scientificName}</div>
+                              </div>
+                              <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                                اختيار
+                              </span>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="p-3 text-center space-y-1.5">
+                            <div className="text-xs text-slate-500 font-bold">لم يتم العثور على الدواء</div>
+                            <button
+                              type="button"
+                              onClick={() => setShowAddMedModal(true)}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>تسجيل كدواء جديد</span>
+                            </button>
                           </div>
-                        ))}
+                        )}
                       </div>
                     )}
                   </div>
@@ -790,6 +821,18 @@ export const PurchasesView: React.FC = () => {
               text: `تم بنجاح قراءة واعتماد فاتورة المذخر (${savedInvoice.invoiceNumber || 'رقم جديد'}) وترحيل الأدوية للمخزن`,
             });
             fetchInvoices();
+          }}
+        />
+      )}
+
+      {/* Add Unregistered Medicine Modal */}
+      {showAddMedModal && (
+        <AddUnregisteredMedicineModal
+          initialSearch={itemSearch}
+          onClose={() => setShowAddMedModal(false)}
+          onSuccess={(newMed) => {
+            setMedicines((prev) => [newMed, ...prev]);
+            handleSelectMed(newMed);
           }}
         />
       )}

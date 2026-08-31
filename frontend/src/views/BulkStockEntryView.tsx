@@ -28,6 +28,10 @@ interface TableRowItem {
   isNewMedicine?: boolean;
   tradeName: string;
   scientificName: string;
+  dosageForm?: string;
+  strength?: string;
+  manufacturer?: string;
+  barcode?: string;
   unitsPerPack: number;
   quantityPacks: number;
   bonusPacks: number;
@@ -214,6 +218,10 @@ export const BulkStockEntryView: React.FC = () => {
       customName: newMedForm.customName || undefined,
       tradeName: newMedForm.tradeName,
       scientificName: newMedForm.scientificName,
+      dosageForm: newMedForm.dosageForm || undefined,
+      strength: newMedForm.strength || undefined,
+      manufacturer: newMedForm.manufacturer || undefined,
+      barcode: newMedForm.barcode || undefined,
       unitsPerPack: Number(newMedForm.unitsPerPack || 1),
       quantityPacks: Number(newMedForm.quantityPacks || 1),
       bonusPacks: Number(newMedForm.bonusPacks || 0),
@@ -276,6 +284,10 @@ export const BulkStockEntryView: React.FC = () => {
             ? {
                 tradeName: i.tradeName,
                 scientificName: i.scientificName,
+                dosageForm: i.dosageForm,
+                strength: i.strength,
+                manufacturer: i.manufacturer,
+                barcode: i.barcode,
                 defaultUnitsPerPack: i.unitsPerPack,
               }
             : undefined,
@@ -533,39 +545,81 @@ export const BulkStockEntryView: React.FC = () => {
 
       {/* 3. Fast Barcode & Search Input */}
       <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs relative">
-        <div className="relative">
-          <Search className="w-5 h-5 absolute right-3.5 top-3.5 text-slate-400" />
-          <input
-            ref={searchInputRef}
-            type="text"
-            value={searchTerm}
-            onChange={(e) => handleSearch(e.target.value)}
-            placeholder="امسح الباركود أو ابحث..."
-            className="w-full pr-11 pl-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-bold text-sm focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="w-5 h-5 absolute right-3.5 top-3.5 text-slate-400" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchTerm}
+              onChange={(e) => handleSearch(e.target.value)}
+              placeholder="امسح الباركود أو اكتب اسم الدواء للبحث..."
+              className="w-full pr-11 pl-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-bold text-sm focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setNewMedForm((prev) => ({
+                ...prev,
+                tradeName: searchTerm,
+                barcode: /^\d+$/.test(searchTerm) ? searchTerm : '',
+              }));
+              setShowNewMedModal(true);
+            }}
+            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 shadow-xs transition-all active:scale-95 cursor-pointer"
+            title="تسجيل دواء جديد غير موجود في الدليل الموحد"
+          >
+            <Plus className="w-4 h-4" />
+            <span>➕ تسجيل دواء جديد</span>
+          </button>
         </div>
 
         {/* Live Search Autocomplete Dropdown */}
-        {searchResults.length > 0 && (
+        {searchTerm.trim().length > 0 && (
           <div className="absolute left-4 right-4 top-14 bg-white rounded-xl shadow-xl border border-slate-200 max-h-64 overflow-y-auto z-20 divide-y divide-slate-100">
-            {searchResults.map((med) => (
-              <div
-                key={med.id}
-                onClick={() => addMedicineToGrid(med)}
-                className="p-3 hover:bg-indigo-50/70 cursor-pointer flex items-center justify-between transition-colors"
-              >
-                <div>
-                  <div className="font-bold text-slate-900 text-sm">{med.tradeName}</div>
-                  <div className="text-xs text-slate-500">
-                    {med.scientificName} • ({med.defaultUnitsPerPack || 1} أشرطة) • {med.dosageForm || ''}
+            {searchResults.length > 0 ? (
+              searchResults.map((med) => (
+                <div
+                  key={med.id}
+                  onClick={() => addMedicineToGrid(med)}
+                  className="p-3 hover:bg-indigo-50/70 cursor-pointer flex items-center justify-between transition-colors"
+                >
+                  <div>
+                    <div className="font-bold text-slate-900 text-sm">{med.tradeName}</div>
+                    <div className="text-xs text-slate-500">
+                      {med.scientificName} • ({med.defaultUnitsPerPack || 1} أشرطة) • {med.dosageForm || ''}
+                    </div>
                   </div>
+                  <button className="px-3 py-1 bg-indigo-600 text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer">
+                    <Plus className="w-3.5 h-3.5" />
+                    إدراج
+                  </button>
                 </div>
-                <button className="px-3 py-1 bg-indigo-600 text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer">
-                  <Plus className="w-3.5 h-3.5" />
-                  إدراج
+              ))
+            ) : (
+              <div className="p-4 text-center space-y-2.5">
+                <div className="text-xs font-bold text-slate-600">
+                  لم يتم العثور على <span className="text-indigo-600 font-black">"{searchTerm}"</span> في الدليل الموحد
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewMedForm((prev) => ({
+                      ...prev,
+                      tradeName: searchTerm,
+                      barcode: /^\d+$/.test(searchTerm) ? searchTerm : '',
+                    }));
+                    setShowNewMedModal(true);
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>تسجيل كدواء جديد وإدراجه في الفاتورة 🚀</span>
                 </button>
               </div>
-            ))}
+            )}
           </div>
         )}
       </div>
