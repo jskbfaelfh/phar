@@ -332,7 +332,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-screen bg-slate-100 flex flex-row text-slate-900 font-sans antialiased overflow-hidden">
+    <div className="h-screen w-full max-w-full bg-slate-100 flex flex-row text-slate-900 font-sans antialiased overflow-x-hidden">
       {/* Mobile Backdrop Overlay */}
       {isMobileMenuOpen && (
         <div
@@ -542,57 +542,58 @@ export const App: React.FC = () => {
       </aside>
 
       {/* Main Content Area (Fixed Top Header + Scrollable Content) */}
-      <div className="flex-1 flex flex-col h-screen min-w-0 overflow-hidden bg-slate-100">
+      <div className="flex-1 flex flex-col h-screen min-w-0 max-w-full overflow-hidden bg-slate-100">
         {/* Slim Fixed Top Bar */}
-        <header className="bg-white border-b border-slate-200/90 h-14 px-5 flex items-center justify-between shrink-0 shadow-2xs">
-          <div className="flex items-center gap-3">
+        <header className="bg-white border-b border-slate-200/90 h-14 px-3 sm:px-5 flex items-center justify-between shrink-0 shadow-2xs w-full max-w-full">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {/* Mobile Hamburger Toggle */}
             <button
               onClick={() => setIsMobileMenuOpen(true)}
-              className="md:hidden p-2 text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer"
+              className="md:hidden p-2 text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer shrink-0"
+              title="فتح القائمة"
             >
               <Menu className="w-5 h-5" />
             </button>
 
             {/* Current Active Page Title & Breadcrumb */}
-            <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
-              <span className="text-slate-400 hidden sm:inline">{currentPharmacy?.name || 'دوائي'}</span>
-              <span className="text-slate-300 hidden sm:inline">/</span>
-              <span className="text-slate-900 font-black">
-                {activeTab === 'POS' && 'الكاشير والمبيعات السريعة'}
-                {activeTab === 'INVENTORY' && 'إدارة المخزون والباركود'}
-                {activeTab === 'PURCHASES' && 'أرشيف وفواتير المشتريات'}
-                {activeTab === 'BULK_STOCK' && 'إدخال وجبة أدوية'}
-                {activeTab === 'EXPENSES' && 'المصاريف التشغيلية وصافي الأرباح'}
-                {activeTab === 'CHAIN' && 'إدارة شبكة الفروع وسلاسل الصيدليات'}
-                {activeTab === 'SUPPLIERS' && 'المذاخر وحسابات الديون'}
-                {activeTab === 'REPORTS' && 'التقارير والأرباح P&L'}
-                {activeTab === 'OWNER_DASHBOARD' && 'لوحة المتابعة اللحظية للمالك'}
-                {activeTab === 'PROFILE' && 'إعدادات وهوية الصيدلية'}
-                {activeTab === 'ADMIN' && 'لوحة الإدارة العامة'}
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 min-w-0">
+              <span className="text-slate-400 hidden lg:inline truncate">{currentPharmacy?.name || 'دوائي'}</span>
+              <span className="text-slate-300 hidden lg:inline">/</span>
+              <span className="text-slate-900 font-black truncate text-xs sm:text-sm">
+                {activeTab === 'POS' && 'الكاشير'}
+                {activeTab === 'INVENTORY' && 'المخزون والباركود'}
+                {activeTab === 'PURCHASES' && 'المشتريات'}
+                {activeTab === 'BULK_STOCK' && 'إدخال وجبة'}
+                {activeTab === 'EXPENSES' && 'المصاريف التشغيلية'}
+                {activeTab === 'CHAIN' && 'إدارة الفروع والسلاسل'}
+                {activeTab === 'SUPPLIERS' && 'المذاخر والديون'}
+                {activeTab === 'REPORTS' && 'التقارير والأرباح'}
+                {activeTab === 'OWNER_DASHBOARD' && 'متابعة المالك'}
+                {activeTab === 'PROFILE' && 'إعدادات الصيدلية'}
+                {activeTab === 'ADMIN' && 'لوحة الإدارة'}
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
             {/* Branch Switcher Dropdown (For Owner with multiple branches or chain) */}
             {currentUser?.role === 'OWNER' && (
               <div className="relative">
                 <button
                   type="button"
                   onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200/80 rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs active:scale-95"
+                  className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200/80 rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs active:scale-95"
                 >
                   <Building2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  <span className="max-w-[120px] sm:max-w-[160px] truncate">
+                  <span className="max-w-[80px] sm:max-w-[140px] truncate">
                     {currentPharmacy?.name || 'الفرع الحالي'}
                   </span>
                   {branches.length > 1 && (
-                    <span className="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] flex items-center justify-center font-bold">
+                    <span className="w-4 h-4 rounded-full bg-indigo-600 text-white text-[9px] flex items-center justify-center font-bold shrink-0">
                       {branches.length}
                     </span>
                   )}
-                  <ChevronDown className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  <ChevronDown className="w-3 h-3 text-indigo-500 shrink-0" />
                 </button>
 
                 {/* Dropdown Menu */}
@@ -650,7 +651,7 @@ export const App: React.FC = () => {
                         <button
                           onClick={() => {
                             setIsBranchDropdownOpen(false);
-                            setActiveTab('CHAIN');
+                            navigateToTab('CHAIN');
                           }}
                           className="w-full text-center py-2 bg-slate-900 hover:bg-indigo-600 text-white rounded-xl text-xs font-black transition-colors cursor-pointer flex items-center justify-center gap-1"
                         >
@@ -666,23 +667,23 @@ export const App: React.FC = () => {
 
             {/* Quick Open Public Search button */}
             <button
-              onClick={() => setActiveTab('PUBLIC_SEARCH')}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              onClick={() => navigateToTab('PUBLIC_SEARCH')}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               title="معاينة شبكة البحث العامة للمواطنين"
             >
-              <Search className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">بحث الشبكة</span>
+              <Search className="w-3.5 h-3.5 text-slate-500" />
+              <span className="hidden sm:inline">بحث الشبكة</span>
             </button>
 
             {/* Quick Role Badge */}
-            <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-[11px] font-bold border border-slate-200">
+            <span className="hidden md:inline-block px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-[11px] font-bold border border-slate-200">
               {currentUser?.name}
             </span>
           </div>
         </header>
 
         {/* Dynamic View Component with Independent Smooth Scroll */}
-        <main className="flex-1 overflow-y-auto p-3 sm:p-5 w-full">
+        <main className="flex-1 overflow-y-auto p-2 sm:p-5 w-full max-w-full overflow-x-hidden">
           {activeTab === 'POS' && <PosView />}
           {activeTab === 'BULK_STOCK' && <BulkStockEntryView />}
           {activeTab === 'INVENTORY' && <InventoryView />}

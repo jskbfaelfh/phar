@@ -77,8 +77,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, onNavigate
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-slate-800 relative">
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-3 sm:p-4 w-full max-w-full overflow-x-hidden">
+      <div className="bg-white rounded-3xl p-5 sm:p-8 max-w-md w-full shadow-2xl border border-slate-800 relative">
         {/* Brand Header */}
         <div className="text-center mb-6">
           <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-xs">

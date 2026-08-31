@@ -662,34 +662,34 @@ export const PosView: React.FC = () => {
 
   return (
     <>
-      <div className="flex flex-col h-[calc(100vh-80px)] gap-4 print:hidden">
+      <div className="flex flex-col min-h-0 lg:h-[calc(100vh-80px)] gap-3 sm:gap-4 print:hidden w-full max-w-full overflow-x-hidden">
       {/* Top Action Bar */}
-      <div className="flex items-center justify-between bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-black text-slate-800 flex items-center gap-2">
-            <ShoppingCart className="w-5 h-5 text-emerald-600" />
-            الكاشير
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-2.5 sm:p-3.5 rounded-xl border border-slate-200 shadow-xs w-full max-w-full">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          <h1 className="text-base sm:text-lg font-black text-slate-800 flex items-center gap-1.5 sm:gap-2">
+            <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
+            <span>الكاشير</span>
           </h1>
 
           {/* Offline / Online Connectivity Indicator */}
           {isOnline ? (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold shadow-2xs">
+            <div className="flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-[10px] sm:text-xs font-bold shadow-2xs">
               {isLiveSyncConnected ? (
                 <>
-                  <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
-                  <span className="hidden sm:inline">مزامنة لحظية نشطة (Live)</span>
+                  <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
+                  <span className="hidden sm:inline">مزامنة لحظية (Live)</span>
                 </>
               ) : (
                 <>
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                   <span className="hidden sm:inline">متصل بالسحابة</span>
                 </>
               )}
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-xs font-black shadow-2xs">
-              <WifiOff className="w-3.5 h-3.5 text-amber-700" />
-              <span>يعمل بدون إنترنت (محلياً)</span>
+            <div className="flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-[10px] sm:text-xs font-black shadow-2xs">
+              <WifiOff className="w-3 h-3 text-amber-700" />
+              <span>محلي (أوفلاين)</span>
             </div>
           )}
 
@@ -698,19 +698,19 @@ export const PosView: React.FC = () => {
             <button
               onClick={syncPendingSales}
               disabled={!isOnline || isSyncing}
-              className="flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95"
+              className="flex items-center gap-1 px-2 py-0.5 sm:px-3 sm:py-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-lg text-[10px] sm:text-xs font-bold transition-all shadow-xs cursor-pointer active:scale-95"
               title="مزامنة الفواتير غير المرفوعة مع السيرفر"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>مزامنة ({pendingSalesCount}) مع السحابة</span>
+              <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>مزامنة ({pendingSalesCount})</span>
             </button>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={toggleFullscreen}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 transition-colors cursor-pointer"
+            className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 transition-colors cursor-pointer"
             title={isFullscreen ? 'الخروج من ملء الشاشة' : 'وضع ملء الشاشة (Kiosk Mode)'}
           >
             {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
@@ -719,18 +719,18 @@ export const PosView: React.FC = () => {
 
           <button
             onClick={() => setShowReturnModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg border border-amber-200 transition-colors cursor-pointer"
+            className="flex items-center gap-1 px-2 sm:px-3 py-1.5 text-[11px] sm:text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg border border-amber-200 transition-colors cursor-pointer"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
-            إرجاع
+            <RefreshCw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+            <span>إرجاع</span>
           </button>
 
           <button
             onClick={fetchShiftSummary}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-300 transition-colors cursor-pointer"
+            className="flex items-center gap-1 px-2 sm:px-3 py-1.5 text-[11px] sm:text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-300 transition-colors cursor-pointer"
           >
-            <DollarSign className="w-3.5 h-3.5" />
-            اليومية
+            <DollarSign className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+            <span>اليومية</span>
           </button>
 
           <button
@@ -738,10 +738,10 @@ export const PosView: React.FC = () => {
               await fetchShiftSummary();
               setShowShiftCloseModal(true);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg border border-rose-200 transition-colors cursor-pointer"
+            className="flex items-center gap-1 px-2 sm:px-3 py-1.5 text-[11px] sm:text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg border border-rose-200 transition-colors cursor-pointer"
             title="إغلاق وردية الكاشير ومطابقة نقد الدرج"
           >
-            <Lock className="w-3.5 h-3.5" />
+            <Lock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
             <span>إغلاق الوردية</span>
           </button>
         </div>
