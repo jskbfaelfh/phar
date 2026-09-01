@@ -67,6 +67,10 @@ export const PurchasesView: React.FC = () => {
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
   const [paidAmount, setPaidAmount] = useState<number>(0);
   const [notes, setNotes] = useState('');
+  const [earlyDiscountDays, setEarlyDiscountDays] = useState<number | ''>('');
+  const [earlyDiscountPercent, setEarlyDiscountPercent] = useState<number | ''>('');
+  const [earlyDiscountAlerts, setEarlyDiscountAlerts] = useState<any[]>([]);
+  const [applyingDiscountId, setApplyingDiscountId] = useState<string | null>(null);
   const [invoiceItems, setInvoiceItems] = useState<PurchaseInvoiceItem[]>([]);
 
   // Medicine selection for new item
@@ -95,14 +99,33 @@ export const PurchasesView: React.FC = () => {
 
   const fetchInitialData = async () => {
     try {
-      const [sups, meds] = await Promise.all([
+      const [sups, meds, alerts] = await Promise.all([
         apiRequest<any[]>('/inventory/suppliers').catch(() => []),
         apiRequest<any[]>('/medicines/search?limit=100').catch(() => []),
+        apiRequest<any[]>('/purchases/early-discount-alerts').catch(() => []),
       ]);
       setSuppliers(sups || []);
       setMedicines(meds || []);
-    } catch (err) {
+      setEarlyDiscountAlerts(alerts || []);
+    } catch (err: any) {
       console.error(err);
+    }
+  };
+
+  const handleApplyEarlyDiscount = async (invId: string) => {
+    if (!confirm('هل تريد تطبيق خصم التسديد المبكر لهذه الفاتورة الآن وتخفيض الدين المستحق؟')) return;
+    setApplyingDiscountId(invId);
+    try {
+      const res = await apiRequest<any>(`/purchases/${invId}/apply-early-discount`, {
+        method: 'POST',
+      });
+      setMessage({ type: 'success', text: res.message || 'تم تطبيق خصم التسديد المبكر بنجاح!' });
+      fetchInvoices();
+      fetchInitialData();
+    } catch (err: any) {
+      alert(err.message || 'فشل تطبيق الخصم');
+    } finally {
+      setApplyingDiscountId(null);
     }
   };
 
@@ -214,6 +237,8 @@ export const PurchasesView: React.FC = () => {
           totalAmount: totalInvoiceAmount,
           paidAmount: Number(paidAmount) || 0,
           notes: notes.trim() || undefined,
+          earlyDiscountDays: earlyDiscountDays !== '' ? Number(earlyDiscountDays) : undefined,
+          earlyDiscountPercent: earlyDiscountPercent !== '' ? Number(earlyDiscountPercent) : undefined,
           items: invoiceItems,
         }),
       });
@@ -226,8 +251,11 @@ export const PurchasesView: React.FC = () => {
       setSupplierName('');
       setPaidAmount(0);
       setNotes('');
+      setEarlyDiscountDays('');
+      setEarlyDiscountPercent('');
       setInvoiceItems([]);
       fetchInvoices();
+      fetchInitialData();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'فشل حفظ فاتورة الشراء' });
     } finally {
@@ -303,6 +331,40 @@ export const PurchasesView: React.FC = () => {
         </div>
       )}
 
+      {/* Early Settlement Discount Urgent Alerts */}
+      {earlyDiscountAlerts.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl space-y-2">
+          <div className="flex items-center gap-2 font-black text-amber-950 text-xs">
+            <Sparkles className="w-4 h-4 text-amber-600 animate-bounce" />
+            <span>تنبيهات السداد المبكر والتوفير (Early Payment Discounts):</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+            {earlyDiscountAlerts.map((alt) => (
+              <div
+                key={alt.id}
+                className="bg-white p-3 rounded-xl border border-amber-200 shadow-2xs flex items-center justify-between"
+              >
+                <div>
+                  <div className="font-bold text-slate-900">
+                    فاتورة <span className="font-mono text-blue-700">{alt.invoiceNumber}</span> — {alt.supplierName}
+                  </div>
+                  <div className="text-[11px] text-amber-800 font-bold mt-0.5">
+                    خصم {alt.earlyDiscountPercent}% (توفير {Number(alt.earlyDiscountAmount || 0).toLocaleString()} د.ع) • متبقي {alt.daysRemaining} أيام
+                  </div>
+                </div>
+                <button
+                  disabled={applyingDiscountId === alt.id}
+                  onClick={() => handleApplyEarlyDiscount(alt.id)}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-black cursor-pointer shadow-xs active:scale-95 transition-all"
+                >
+                  {applyingDiscountId === alt.id ? 'جاري التطبيق...' : '⚡ تطبيق الخصم وتخفيض الدين'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Search and Summary Filters */}
       <div className="flex items-center gap-3 bg-white p-3.5 rounded-2xl border border-slate-200">
         <div className="relative flex-1">
@@ -333,20 +395,21 @@ export const PurchasesView: React.FC = () => {
                 <th className="p-3.5">إجمالي المبلغ</th>
                 <th className="p-3.5">المدفوع</th>
                 <th className="p-3.5">المتبقي (الآجل)</th>
+                <th className="p-3.5">خصم السداد المبكر</th>
                 <th className="p-3.5 text-center">الإجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-10 text-slate-400">
+                  <td colSpan={9} className="text-center py-10 text-slate-400">
                     <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-500" />
                     جاري تحميل فواتير الشراء...
                   </td>
                 </tr>
               ) : invoices.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12 text-slate-400">
+                  <td colSpan={9} className="text-center py-12 text-slate-400">
                     <Package className="w-8 h-8 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
                     لا توجد فواتير شراء مسجلة حالياً.
                   </td>
@@ -377,6 +440,29 @@ export const PurchasesView: React.FC = () => {
                         </span>
                       ) : (
                         <span className="text-emerald-600">مسدد بالكامل</span>
+                      )}
+                    </td>
+                    <td className="p-3.5 text-xs">
+                      {(inv as any).earlyDiscountApplied ? (
+                        <span className="px-2 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-md font-bold text-[10px] inline-flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          خصم {(inv as any).earlyDiscountPercent}% مُطبّق (وفر {Number((inv as any).earlyDiscountAppliedAmount || 0).toLocaleString()} د.ع)
+                        </span>
+                      ) : (inv as any).earlyDiscountDeadline && Number(inv.remainingAmount) > 0 ? (
+                        <div className="space-y-1">
+                          <span className="px-2 py-0.5 bg-amber-50 text-amber-900 border border-amber-200 rounded-md font-bold text-[10px] block w-fit">
+                            ⚡ خصم {(inv as any).earlyDiscountPercent}% متاح (توفير {Number((inv as any).earlyDiscountAmount || 0).toLocaleString()} د.ع)
+                          </span>
+                          <button
+                            disabled={applyingDiscountId === inv.id}
+                            onClick={() => handleApplyEarlyDiscount(inv.id)}
+                            className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-md text-[10px] font-black cursor-pointer shadow-2xs active:scale-95 transition-all"
+                          >
+                            {applyingDiscountId === inv.id ? 'جاري التطبيق...' : '⚡ تطبيق الخصم الآن'}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 text-[11px]">—</span>
                       )}
                     </td>
                     <td className="p-3.5 text-center">
@@ -572,6 +658,55 @@ export const PurchasesView: React.FC = () => {
                     className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-mono text-slate-900 focus:outline-hidden focus:border-blue-500"
                   />
                 </div>
+              </div>
+
+              {/* Early Settlement Discount Settings */}
+              <div className="p-4 bg-amber-50/60 rounded-2xl border border-amber-200/80 space-y-2.5">
+                <div className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-600" />
+                  <span>شروط خُصومات التسديد المبكر للمذخر (مثلاً: خصم 4% عند التسديد خلال شهرين):</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">مهلة التسديد للحصول على الخصم (بالأيام)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={earlyDiscountDays}
+                      onChange={(e) => setEarlyDiscountDays(e.target.value ? Number(e.target.value) : '')}
+                      placeholder="مثلاً: 60 (خلال 60 يوم)"
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 focus:outline-hidden focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">نسبة الخصم المشروطة %</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      max="100"
+                      value={earlyDiscountPercent}
+                      onChange={(e) => setEarlyDiscountPercent(e.target.value ? Number(e.target.value) : '')}
+                      placeholder="مثلاً: 4%"
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 focus:outline-hidden focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {earlyDiscountDays !== '' && earlyDiscountPercent !== '' && totalInvoiceAmount > 0 && (
+                  <div className="p-2.5 bg-white rounded-xl border border-amber-200 text-xs font-bold text-amber-900 flex items-center justify-between flex-wrap gap-2">
+                    <span>
+                      💡 مهلة الخصم تستمر حتى تاريخ:{' '}
+                      <span className="font-mono text-blue-700">
+                        {new Date(new Date(invoiceDate).getTime() + Number(earlyDiscountDays) * 86400000).toLocaleDateString('ar-IQ')}
+                      </span>
+                    </span>
+                    <span className="text-emerald-700 font-black">
+                      مبلغ الخصم المتوقع عند التسديد: {Math.round(totalInvoiceAmount * (Number(earlyDiscountPercent) / 100)).toLocaleString()} د.ع
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Add Medicine Line Item Box */}

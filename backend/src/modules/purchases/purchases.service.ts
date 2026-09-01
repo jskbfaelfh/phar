@@ -13,10 +13,6 @@ export class PurchasesService {
    * Helper to ensure all tables exist in the tenant schema
    */
   private async ensureTablesExist(schemaName: string) {
-    if (PurchasesService.verifiedSchemas.has(schemaName)) {
-      return;
-    }
-
     const statements = [
       `ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS custom_name VARCHAR(255);`,
       `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS supplier_id UUID;`,
@@ -25,6 +21,12 @@ export class PurchasesService {
       `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_pack DECIMAL(12, 2);`,
       `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_unit DECIMAL(12, 2);`,
       `ALTER TABLE "${schemaName}".purchase_invoice_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();`,
+      `ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_days INT;`,
+      `ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_percent DECIMAL(5, 2);`,
+      `ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_deadline DATE;`,
+      `ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_amount DECIMAL(12, 2);`,
+      `ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_applied BOOLEAN DEFAULT FALSE;`,
+      `ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_applied_amount DECIMAL(12, 2) DEFAULT 0;`,
       `CREATE TABLE IF NOT EXISTS "${schemaName}".suppliers (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name VARCHAR(255) NOT NULL,
@@ -158,6 +160,16 @@ export class PurchasesService {
     const purchaseId = crypto.randomUUID();
     const paymentStatus = remainingAmount === 0 ? 'PAID' : (paidAmount > 0 ? 'PARTIAL' : 'UNPAID');
 
+    const earlyDiscountDays = dto.earlyDiscountDays ? Number(dto.earlyDiscountDays) : null;
+    const earlyDiscountPercent = dto.earlyDiscountPercent ? Number(dto.earlyDiscountPercent) : null;
+    let earlyDiscountDeadline: Date | null = null;
+    let earlyDiscountAmount: number | null = null;
+
+    if (earlyDiscountDays && earlyDiscountDays > 0 && earlyDiscountPercent && earlyDiscountPercent > 0) {
+      earlyDiscountDeadline = new Date(invoiceDate.getTime() + earlyDiscountDays * 24 * 60 * 60 * 1000);
+      earlyDiscountAmount = Math.round(totalAmount * (earlyDiscountPercent / 100));
+    }
+
     // 1. Insert into purchases table (standard unified system)
     await this.prisma.$executeRawUnsafe(`
       INSERT INTO "${schema}"."purchases" (
@@ -184,9 +196,10 @@ export class PurchasesService {
     const invoiceInsert = await this.prisma.$queryRawUnsafe<Array<{ id: string }>>(`
       INSERT INTO "${schema}"."purchase_invoices" (
         "id", "invoice_number", "supplier_id", "supplier_name", "invoice_date",
-        "total_amount", "paid_amount", "remaining_amount", "notes", "items_count"
+        "total_amount", "paid_amount", "remaining_amount", "notes", "items_count",
+        "early_discount_days", "early_discount_percent", "early_discount_deadline", "early_discount_amount"
       ) VALUES (
-        $1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10
+        $1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
       ) RETURNING id;
     `,
       purchaseId,
@@ -198,7 +211,11 @@ export class PurchasesService {
       paidAmount,
       remainingAmount,
       dto.notes || null,
-      dto.items.length
+      dto.items.length,
+      earlyDiscountDays,
+      earlyDiscountPercent,
+      earlyDiscountDeadline,
+      earlyDiscountAmount
     );
 
     const invoiceId = invoiceInsert[0].id;
@@ -387,6 +404,12 @@ export class PurchasesService {
         pi.remaining_amount as "remainingAmount",
         pi.notes,
         pi.items_count as "itemsCount",
+        pi.early_discount_days as "earlyDiscountDays",
+        pi.early_discount_percent as "earlyDiscountPercent",
+        pi.early_discount_deadline as "earlyDiscountDeadline",
+        pi.early_discount_amount as "earlyDiscountAmount",
+        pi.early_discount_applied as "earlyDiscountApplied",
+        pi.early_discount_applied_amount as "earlyDiscountAppliedAmount",
         pi.created_at as "createdAt"
       FROM "${schema}"."purchase_invoices" pi
     `;
@@ -426,6 +449,12 @@ export class PurchasesService {
         pi.remaining_amount as "remainingAmount",
         pi.notes,
         pi.items_count as "itemsCount",
+        pi.early_discount_days as "earlyDiscountDays",
+        pi.early_discount_percent as "earlyDiscountPercent",
+        pi.early_discount_deadline as "earlyDiscountDeadline",
+        pi.early_discount_amount as "earlyDiscountAmount",
+        pi.early_discount_applied as "earlyDiscountApplied",
+        pi.early_discount_applied_amount as "earlyDiscountAppliedAmount",
         pi.created_at as "createdAt"
       FROM "${schema}"."purchase_invoices" pi
       WHERE pi.id = $1::uuid;
@@ -459,5 +488,112 @@ export class PurchasesService {
       ...invoice,
       items,
     };
+  }
+
+  /**
+   * Apply early settlement discount to a purchase invoice
+   */
+  async applyEarlyDiscount(tenantId: string, invoiceId: string) {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant || !tenant.schemaName) {
+      throw new BadRequestException('الصيدلية غير متوفرة');
+    }
+
+    const schema = tenant.schemaName;
+    await this.ensureTablesExist(schema);
+
+    const invoices = await this.prisma.$queryRawUnsafe<any[]>(`
+      SELECT * FROM "${schema}"."purchase_invoices" WHERE id = $1::uuid;
+    `, invoiceId);
+
+    if (!invoices || invoices.length === 0) {
+      throw new NotFoundException('فاتورة الشراء غير موجودة');
+    }
+
+    const inv = invoices[0];
+    if (inv.early_discount_applied) {
+      throw new BadRequestException('تم تطبيق خصم التسديد المبكر لهذه الفاتورة مسبقاً');
+    }
+
+    const totalAmount = Number(inv.total_amount) || 0;
+    const remainingAmount = Number(inv.remaining_amount) || 0;
+    let discountAmount = Number(inv.early_discount_amount);
+
+    if (!discountAmount || discountAmount <= 0) {
+      const pct = Number(inv.early_discount_percent) || 0;
+      discountAmount = Math.round(totalAmount * (pct / 100));
+    }
+
+    if (discountAmount <= 0) {
+      throw new BadRequestException('لا توجد نسبة خصم تسديد مبكر محددة لهذه الفاتورة');
+    }
+
+    const newRemaining = Math.max(0, remainingAmount - discountAmount);
+
+    await this.prisma.$executeRawUnsafe(`
+      UPDATE "${schema}"."purchase_invoices"
+      SET 
+        early_discount_applied = TRUE,
+        early_discount_applied_amount = $1,
+        remaining_amount = $2,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3::uuid;
+    `, discountAmount, newRemaining, invoiceId);
+
+    // Also update purchases table if exists
+    try {
+      await this.prisma.$executeRawUnsafe(`
+        UPDATE "${schema}"."purchases"
+        SET 
+          remaining_amount = $1,
+          payment_status = CASE WHEN $1 <= 0 THEN 'PAID' ELSE 'PARTIAL' END
+        WHERE id = $2::uuid;
+      `, newRemaining, invoiceId);
+    } catch (err) {
+      // Ignore if table mismatch
+    }
+
+    return {
+      success: true,
+      message: `تم تطبيق خصم التسديد المبكر بقيمة (${discountAmount.toLocaleString()} د.ع) وتخفيض الدين إلى (${newRemaining.toLocaleString()} د.ع)`,
+      discountAmount,
+      newRemainingAmount: newRemaining,
+    };
+  }
+
+  /**
+   * Get active early discount alerts for upcoming invoice deadlines
+   */
+  async getEarlyDiscountAlerts(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant || !tenant.schemaName) {
+      return [];
+    }
+
+    const schema = tenant.schemaName;
+    await this.ensureTablesExist(schema);
+
+    const alerts = await this.prisma.$queryRawUnsafe<any[]>(`
+      SELECT 
+        pi.id,
+        pi.invoice_number as "invoiceNumber",
+        pi.supplier_name as "supplierName",
+        pi.total_amount as "totalAmount",
+        pi.remaining_amount as "remainingAmount",
+        pi.early_discount_days as "earlyDiscountDays",
+        pi.early_discount_percent as "earlyDiscountPercent",
+        pi.early_discount_deadline as "earlyDiscountDeadline",
+        pi.early_discount_amount as "earlyDiscountAmount",
+        (pi.early_discount_deadline::date - CURRENT_DATE) as "daysRemaining"
+      FROM "${schema}"."purchase_invoices" pi
+      WHERE pi.remaining_amount > 0
+        AND (pi.early_discount_applied IS FALSE OR pi.early_discount_applied IS NULL)
+        AND pi.early_discount_deadline IS NOT NULL
+        AND pi.early_discount_deadline >= CURRENT_DATE
+      ORDER BY pi.early_discount_deadline ASC
+      LIMIT 20;
+    `);
+
+    return alerts;
   }
 }

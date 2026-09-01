@@ -49,6 +49,8 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
   const [supplierName, setSupplierName] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
   const [paidAmount, setPaidAmount] = useState<number>(0);
+  const [earlyDiscountDays, setEarlyDiscountDays] = useState<number | ''>('');
+  const [earlyDiscountPercent, setEarlyDiscountPercent] = useState<number | ''>('');
   const [confidenceScore, setConfidenceScore] = useState<number>(90);
   const [items, setItems] = useState<ScannedItem[]>([]);
   const [discrepanciesCount, setDiscrepanciesCount] = useState<number>(0);
@@ -125,6 +127,9 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
         setConfidenceScore(response.confidenceScore || 90);
         setDiscrepanciesCount(response.discrepanciesCount || 0);
 
+        if (response.earlyDiscountDays) setEarlyDiscountDays(Number(response.earlyDiscountDays));
+        if (response.earlyDiscountPercent) setEarlyDiscountPercent(Number(response.earlyDiscountPercent));
+
         const total = response.items.reduce((s: number, it: any) => s + Number(it.totalCost || 0), 0);
         setPaidAmount(total); // Default full cash or pharmacist can adjust
 
@@ -188,6 +193,8 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
         invoiceDate: new Date(invoiceDate).toISOString().slice(0, 10),
         totalAmount: calculatedTotal,
         paidAmount: Number(paidAmount) || 0,
+        earlyDiscountDays: earlyDiscountDays !== '' ? Number(earlyDiscountDays) : undefined,
+        earlyDiscountPercent: earlyDiscountPercent !== '' ? Number(earlyDiscountPercent) : undefined,
         notes: `تم الإدخال والاعتماد عبر الذكاء الاصطناعي الذكي (AI Smart OCR - دقة ${confidenceScore}%)`,
         items: items.map((it) => ({
           medicineId: it.matchedMedicineId || undefined,
@@ -437,6 +444,55 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
                     className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold font-mono text-slate-900 focus:outline-hidden focus:border-emerald-500"
                   />
                 </div>
+              </div>
+
+              {/* Early Settlement Discount Settings */}
+              <div className="p-4 bg-amber-50/70 border border-amber-200/90 rounded-2xl space-y-2 text-xs">
+                <div className="font-black text-amber-950 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-600" />
+                  <span>شروط خُصومات التسديد المبكر للمذخر (مكتشفة بالذكاء الاصطناعي أو يمكنك تعديلها):</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">مهلة التسديد للحصول على الخصم (بالأيام)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={earlyDiscountDays}
+                      onChange={(e) => setEarlyDiscountDays(e.target.value ? Number(e.target.value) : '')}
+                      placeholder="مثلاً: 60 (خلال 60 يوم)"
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 focus:outline-hidden focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">نسبة الخصم المشروطة %</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0.1"
+                      max="100"
+                      value={earlyDiscountPercent}
+                      onChange={(e) => setEarlyDiscountPercent(e.target.value ? Number(e.target.value) : '')}
+                      placeholder="مثلاً: 3%"
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 focus:outline-hidden focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {earlyDiscountDays !== '' && earlyDiscountPercent !== '' && totalInvoiceAmount > 0 && (
+                  <div className="p-2 bg-white rounded-xl border border-amber-200 text-[11px] font-bold text-amber-900 flex items-center justify-between flex-wrap gap-1">
+                    <span>
+                      💡 يسري الخصم حتى:{' '}
+                      <span className="font-mono text-blue-700">
+                        {new Date(new Date(invoiceDate).getTime() + Number(earlyDiscountDays) * 86400000).toLocaleDateString('ar-IQ')}
+                      </span>
+                    </span>
+                    <span className="text-emerald-700 font-black">
+                      مبلغ الخصم المتوقع عند التسديد: {Math.round(totalInvoiceAmount * (Number(earlyDiscountPercent) / 100)).toLocaleString()} د.ع
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Items Review Table */}

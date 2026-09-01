@@ -391,10 +391,10 @@ export const ExpensesView: React.FC = () => {
                   <input
                     type="number"
                     required
-                    min="100"
-                    step="250"
+                    min="1"
+                    step="any"
                     value={amount}
-                    onChange={(e) => setAmount(Number(e.target.value))}
+                    onChange={(e) => setAmount(e.target.value !== '' ? Number(e.target.value) : '')}
                     placeholder="مثال: 50000"
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono font-bold text-rose-600 focus:outline-hidden focus:border-rose-500"
                   />

@@ -28,6 +28,16 @@ export class PurchasesController {
     return this.purchasesService.getPurchases(req.user.tenantId, search);
   }
 
+  @Get('early-discount-alerts')
+  getEarlyDiscountAlerts(@Request() req: any) {
+    return this.purchasesService.getEarlyDiscountAlerts(req.user.tenantId);
+  }
+
+  @Post(':id/apply-early-discount')
+  applyEarlyDiscount(@Request() req: any, @Param('id') id: string) {
+    return this.purchasesService.applyEarlyDiscount(req.user.tenantId, id);
+  }
+
   @Get(':id')
   getPurchaseById(@Request() req: any, @Param('id') id: string) {
     return this.purchasesService.getPurchaseById(req.user.tenantId, id);

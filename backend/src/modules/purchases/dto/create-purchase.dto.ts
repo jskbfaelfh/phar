@@ -73,6 +73,14 @@ export class CreatePurchaseDto {
   @IsOptional()
   paidAmount?: number;
 
+  @IsNumber()
+  @IsOptional()
+  earlyDiscountDays?: number;
+
+  @IsNumber()
+  @IsOptional()
+  earlyDiscountPercent?: number;
+
   @IsString()
   @IsOptional()
   notes?: string;

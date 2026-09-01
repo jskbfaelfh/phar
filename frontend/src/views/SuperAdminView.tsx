@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { IRAQ_LOCATIONS } from '../data/iraq-locations';
+import { AddUnregisteredMedicineModal } from '../components/AddUnregisteredMedicineModal';
 
 export const SuperAdminView: React.FC = () => {
   const [dashboard, setDashboard] = useState<any | null>(null);
@@ -39,23 +40,81 @@ export const SuperAdminView: React.FC = () => {
   const [unverifiedMedicines, setUnverifiedMedicines] = useState<any[]>([]);
   const [totalUnverifiedMeds, setTotalUnverifiedMeds] = useState<number>(0);
   const [totalVerifiedMeds, setTotalVerifiedMeds] = useState<number>(0);
+  const [masterCatalogFilter, setMasterCatalogFilter] = useState<'ALL' | 'VERIFIED' | 'UNVERIFIED'>('ALL');
+  const [masterCatalogPage, setMasterCatalogPage] = useState(1);
+  const [masterCatalogTotalPages, setMasterCatalogTotalPages] = useState(1);
+  const [masterCatalogTotalItems, setMasterCatalogTotalItems] = useState(0);
   const [loadingMeds, setLoadingMeds] = useState(false);
   const [medSearch, setMedSearch] = useState('');
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
 
-  const fetchMedicinesData = async () => {
+  // Edit Medicine Modal State
+  const [editingMedicine, setEditingMedicine] = useState<any | null>(null);
+  const [editMedForm, setEditMedForm] = useState({
+    tradeName: '',
+    scientificName: '',
+    dosageForm: '',
+    strength: '',
+    manufacturer: '',
+    barcode: '',
+    defaultUnitsPerPack: 1,
+    isVerified: true,
+  });
+  const [savingMed, setSavingMed] = useState(false);
+  const [showAddMedModalAdmin, setShowAddMedModalAdmin] = useState(false);
+
+  const fetchMedicinesData = async (page: number = 1, filterOverride?: 'ALL' | 'VERIFIED' | 'UNVERIFIED') => {
     setLoadingMeds(true);
+    const activeFilter = filterOverride || masterCatalogFilter;
     try {
-      const data = await apiRequest<any>(`/medicines/unverified${medSearch ? `?search=${encodeURIComponent(medSearch)}` : ''}`);
+      const data = await apiRequest<any>(
+        `/medicines/master-catalog?page=${page}&limit=50&filter=${activeFilter}${medSearch ? `&search=${encodeURIComponent(medSearch)}` : ''}`
+      );
       if (data) {
         setUnverifiedMedicines(data.items || []);
         setTotalUnverifiedMeds(data.totalUnverified || 0);
         setTotalVerifiedMeds(data.totalVerified || 0);
+        setMasterCatalogTotalItems(data.total || 0);
+        setMasterCatalogPage(data.page || 1);
+        setMasterCatalogTotalPages(data.totalPages || 1);
       }
     } catch (err: any) {
-      console.error('Error fetching unverified medicines:', err);
+      console.error('Error fetching master medicines catalog:', err);
     } finally {
       setLoadingMeds(false);
+    }
+  };
+
+  const openEditMedicineModal = (med: any) => {
+    setEditingMedicine(med);
+    setEditMedForm({
+      tradeName: med.tradeName || '',
+      scientificName: med.scientificName || '',
+      dosageForm: med.dosageForm || '',
+      strength: med.strength || '',
+      manufacturer: med.manufacturer || '',
+      barcode: med.barcode || '',
+      defaultUnitsPerPack: med.defaultUnitsPerPack || 1,
+      isVerified: med.isVerified !== undefined ? med.isVerified : true,
+    });
+  };
+
+  const handleUpdateMedicineSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMedicine) return;
+    setSavingMed(true);
+    try {
+      const res = await apiRequest<any>(`/medicines/${editingMedicine.id}/update`, {
+        method: 'POST',
+        body: JSON.stringify(editMedForm),
+      });
+      setMessage({ type: 'success', text: res.message || 'تم تحديث بيانات الدواء بنجاح!' });
+      setEditingMedicine(null);
+      fetchMedicinesData(masterCatalogPage);
+    } catch (err: any) {
+      alert(err.message || 'فشل تحديث الدواء');
+    } finally {
+      setSavingMed(false);
     }
   };
 
@@ -66,7 +125,7 @@ export const SuperAdminView: React.FC = () => {
         method: 'POST',
       });
       setMessage({ type: 'success', text: res.message || `تم اعتماد (${med.tradeName}) بنجاح!` });
-      fetchMedicinesData();
+      fetchMedicinesData(masterCatalogPage);
     } catch (err: any) {
       alert(err.message || 'فشل اعتماد الدواء');
     } finally {
@@ -75,13 +134,13 @@ export const SuperAdminView: React.FC = () => {
   };
 
   const handleDeleteMedicine = async (med: any) => {
-    if (!confirm(`هل أنت متأكد من حذف الدواء (${med.tradeName})؟`)) return;
+    if (!confirm(`هل أنت متأكد من حذف الدواء (${med.tradeName}) نهائياً من قاعدة البيانات الرئيسية؟`)) return;
     try {
       await apiRequest<any>(`/medicines/delete-medicine/${med.id}`, {
         method: 'POST',
       });
       setMessage({ type: 'success', text: `تم حذف الدواء (${med.tradeName}) بنجاح` });
-      fetchMedicinesData();
+      fetchMedicinesData(masterCatalogPage);
     } catch (err: any) {
       alert(err.message || 'فشل الحذف');
     }
@@ -949,6 +1008,18 @@ export const SuperAdminView: React.FC = () => {
 
         <div className="flex items-center gap-2 flex-wrap">
           <button
+            onClick={() => {
+              setActiveAdminTab('medicines');
+              fetchMedicinesData(1, 'ALL');
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 rounded-xl text-xs font-black shadow-2xs transition-all active:scale-95 cursor-pointer"
+            title="عرض وتعديل وإضافة أدوية في قاعدة البيانات الرئيسية"
+          >
+            <Pill className="w-4 h-4 text-emerald-600" />
+            <span>💊 إدارة الدليل الموحد والأدوية</span>
+          </button>
+
+          <button
             onClick={() => setShowMergeModal(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 rounded-xl text-xs font-black shadow-2xs transition-all active:scale-95 cursor-pointer"
             title="دمج صيدليات مسجلة مسبقاً وتعيين فرع رئيسي"
@@ -1417,57 +1488,87 @@ export const SuperAdminView: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 3: دليل الأدوية والأصناف غير المدققة */}
+      {/* TAB 3: دليل الأدوية المركزي وإدارة القاعدة الرئيسية */}
       {activeAdminTab === 'medicines' && (
         <div className="space-y-6">
           {/* Stats & Overview Header */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-              <div className="text-xs text-rose-700 font-bold flex items-center gap-1.5">
-                <AlertCircle className="w-4 h-4 text-rose-600" />
-                أدوية بانتظار الاعتماد والتدقيق
+            <button
+              onClick={() => {
+                setMasterCatalogFilter('UNVERIFIED');
+                fetchMedicinesData(1, 'UNVERIFIED');
+              }}
+              className={`p-5 rounded-2xl border text-right transition-all cursor-pointer ${
+                masterCatalogFilter === 'UNVERIFIED'
+                  ? 'bg-rose-600 text-white border-rose-600 shadow-md ring-2 ring-rose-400 ring-offset-2'
+                  : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300'
+              }`}
+            >
+              <div className="text-xs font-bold flex items-center justify-between opacity-90">
+                <span>أدوية بانتظار الاعتماد والتدقيق</span>
+                <AlertCircle className="w-4 h-4 opacity-80" />
               </div>
-              <div className="text-3xl font-black text-rose-700 mt-1 font-mono">{totalUnverifiedMeds}</div>
-              <div className="text-[11px] text-slate-400 mt-0.5">أصناف أضافتها الصيدليات محلياً</div>
-            </div>
+              <div className="text-3xl font-black mt-1 font-mono">{totalUnverifiedMeds}</div>
+              <div className="text-[11px] opacity-75 mt-0.5">أصناف أضافتها الصيدليات محلياً</div>
+            </button>
 
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-              <div className="text-xs text-emerald-700 font-bold flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                أدوية معتمدة رسمياً في الدليل
+            <button
+              onClick={() => {
+                setMasterCatalogFilter('VERIFIED');
+                fetchMedicinesData(1, 'VERIFIED');
+              }}
+              className={`p-5 rounded-2xl border text-right transition-all cursor-pointer ${
+                masterCatalogFilter === 'VERIFIED'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-md ring-2 ring-emerald-400 ring-offset-2'
+                  : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300'
+              }`}
+            >
+              <div className="text-xs font-bold flex items-center justify-between opacity-90">
+                <span>أدوية معتمدة رسمياً في الدليل</span>
+                <CheckCircle2 className="w-4 h-4 opacity-80" />
               </div>
-              <div className="text-3xl font-black text-emerald-700 mt-1 font-mono">{totalVerifiedMeds}</div>
-              <div className="text-[11px] text-slate-400 mt-0.5">جاهزة للاختيار التلقائي لجميع الصيدليات</div>
-            </div>
+              <div className="text-3xl font-black mt-1 font-mono">{totalVerifiedMeds}</div>
+              <div className="text-[11px] opacity-75 mt-0.5">جاهزة للاختيار التلقائي لجميع الصيدليات</div>
+            </button>
 
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-              <div className="text-xs text-indigo-700 font-bold flex items-center gap-1.5">
-                <Pill className="w-4 h-4 text-indigo-600" />
-                إجمالي الأصناف بالقاعدة
+            <button
+              onClick={() => {
+                setMasterCatalogFilter('ALL');
+                fetchMedicinesData(1, 'ALL');
+              }}
+              className={`p-5 rounded-2xl border text-right transition-all cursor-pointer ${
+                masterCatalogFilter === 'ALL'
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-400 ring-offset-2'
+                  : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300'
+              }`}
+            >
+              <div className="text-xs font-bold flex items-center justify-between opacity-90">
+                <span>إجمالي الأصناف بالقاعدة</span>
+                <Pill className="w-4 h-4 opacity-80" />
               </div>
-              <div className="text-3xl font-black text-indigo-700 mt-1 font-mono">{totalUnverifiedMeds + totalVerifiedMeds}</div>
-              <div className="text-[11px] text-slate-400 mt-0.5">دليل وطني موحد للأدوية</div>
-            </div>
+              <div className="text-3xl font-black mt-1 font-mono">{totalUnverifiedMeds + totalVerifiedMeds}</div>
+              <div className="text-[11px] opacity-75 mt-0.5">دليل وطني موحد للأدوية</div>
+            </button>
           </div>
 
           {/* Action Toolbar & Search */}
           <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex-1 w-full md:w-auto relative max-w-md">
-              <Search className="w-4 h-4 absolute right-3.5 top-3 text-slate-400" />
-              <input
-                type="text"
-                value={medSearch}
-                onChange={(e) => setMedSearch(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && fetchMedicinesData()}
-                placeholder="ابحث باسم الدواء، العلمي، أو الباركود..."
-                className="w-full pr-10 pl-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:outline-hidden"
-              />
-            </div>
+            <div className="flex items-center gap-2 w-full md:w-auto flex-1 max-w-lg">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute right-3.5 top-3 text-slate-400" />
+                <input
+                  type="text"
+                  value={medSearch}
+                  onChange={(e) => setMedSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && fetchMedicinesData(1)}
+                  placeholder="ابحث باسم الدواء، العلمي، الباركود، أو الشركة..."
+                  className="w-full pr-10 pl-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:outline-hidden"
+                />
+              </div>
 
-            <div className="flex items-center gap-2">
               <button
-                onClick={fetchMedicinesData}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                onClick={() => fetchMedicinesData(1)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 shrink-0"
               >
                 <Search className="w-3.5 h-3.5" />
                 <span>بحث</span>
@@ -1476,24 +1577,69 @@ export const SuperAdminView: React.FC = () => {
               <button
                 onClick={() => {
                   setMedSearch('');
-                  fetchMedicinesData();
+                  fetchMedicinesData(1);
                 }}
-                className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer shrink-0"
                 title="تحديث القائمة"
               >
                 <RefreshCw className={`w-4 h-4 ${loadingMeds ? 'animate-spin' : ''}`} />
               </button>
             </div>
+
+            <button
+              onClick={() => setShowAddMedModalAdmin(true)}
+              className="w-full md:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>➕ إضافة دواء جديد للمنظومة</span>
+            </button>
           </div>
 
-          {/* Unverified Medicines Table */}
+          {/* Master Medicines Table */}
           <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between flex-wrap gap-2">
               <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-rose-600" />
-                <span>الأدوية المضافة حديثاً بانتظار التدقيق والاعتماد ({unverifiedMedicines.length})</span>
+                <Pill className="w-4 h-4 text-indigo-600" />
+                <span>
+                  دليل الأدوية المركزية {masterCatalogFilter === 'UNVERIFIED' ? '(غير المدققة)' : masterCatalogFilter === 'VERIFIED' ? '(المعتمدة)' : '(عرض الكل)'} - [{masterCatalogTotalItems} صنف]
+                </span>
               </h3>
-              <span className="text-xs text-slate-400">اعتماد الدواء يجعله متاحاً لجميع صيدليات العراق</span>
+              
+              <div className="flex items-center gap-1 bg-slate-200 p-1 rounded-xl text-xs font-bold">
+                <button
+                  onClick={() => {
+                    setMasterCatalogFilter('ALL');
+                    fetchMedicinesData(1, 'ALL');
+                  }}
+                  className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
+                    masterCatalogFilter === 'ALL' ? 'bg-white text-indigo-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  الكل ({totalUnverifiedMeds + totalVerifiedMeds})
+                </button>
+                <button
+                  onClick={() => {
+                    setMasterCatalogFilter('UNVERIFIED');
+                    fetchMedicinesData(1, 'UNVERIFIED');
+                  }}
+                  className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
+                    masterCatalogFilter === 'UNVERIFIED' ? 'bg-white text-rose-800 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  غير مدققة ({totalUnverifiedMeds})
+                </button>
+                <button
+                  onClick={() => {
+                    setMasterCatalogFilter('VERIFIED');
+                    fetchMedicinesData(1, 'VERIFIED');
+                  }}
+                  className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
+                    masterCatalogFilter === 'VERIFIED' ? 'bg-white text-emerald-800 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  معتمدة ({totalVerifiedMeds})
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -1521,8 +1667,7 @@ export const SuperAdminView: React.FC = () => {
                     <tr>
                       <td colSpan={7} className="p-12 text-center text-slate-400 space-y-2">
                         <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto opacity-70" />
-                        <div className="font-bold text-sm text-slate-700">لا توجد أدوية غير مدققة حالياً!</div>
-                        <div className="text-xs text-slate-400">جميع الأدوية المسجلة تم تدقيقها واعتمادها في الدليل الموحد.</div>
+                        <div className="font-bold text-sm text-slate-700">لا توجد أدوية مطابقة للبحث أو الفلتر المحدد</div>
                       </td>
                     </tr>
                   ) : (
@@ -1551,30 +1696,46 @@ export const SuperAdminView: React.FC = () => {
                           {med.manufacturer && <div className="text-[10px] text-slate-400">{med.manufacturer}</div>}
                         </td>
                         <td className="p-3 text-center">
-                          <span className="px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-full text-[10px] font-black">
-                            بانتظار الاعتماد ⏳
-                          </span>
+                          {med.isVerified ? (
+                            <span className="px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-[10px] font-black">
+                              معتمد ✅
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-full text-[10px] font-black">
+                              بانتظار الاعتماد ⏳
+                            </span>
+                          )}
                         </td>
                         <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
-                              disabled={verifyingId === med.id}
-                              onClick={() => handleVerifyMedicine(med)}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-black shadow-xs flex items-center gap-1 cursor-pointer active:scale-95 transition-all"
-                              title="اعتماد الدواء ليصبح متاحاً لجميع الصيدليات"
+                              onClick={() => openEditMedicineModal(med)}
+                              className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold cursor-pointer transition-colors"
+                              title="تعديل بيانات الدواء"
                             >
-                              {verifyingId === med.id ? (
-                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                              )}
-                              <span>اعتماد الدواء ✅</span>
+                              ✏️ تعديل
                             </button>
+
+                            {!med.isVerified && (
+                              <button
+                                disabled={verifyingId === med.id}
+                                onClick={() => handleVerifyMedicine(med)}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white rounded-lg text-xs font-black shadow-xs flex items-center gap-1 cursor-pointer active:scale-95 transition-all"
+                                title="اعتماد الدواء ليصبح متاحاً لجميع الصيدليات"
+                              >
+                                {verifyingId === med.id ? (
+                                  <RefreshCw className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="w-3 h-3" />
+                                )}
+                                <span>اعتماد ✅</span>
+                              </button>
+                            )}
 
                             <button
                               onClick={() => handleDeleteMedicine(med)}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
-                              title="حذف الصنف"
+                              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                              title="حذف الصنف نهائياً"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -1586,6 +1747,31 @@ export const SuperAdminView: React.FC = () => {
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination Controls */}
+            {masterCatalogTotalPages > 1 && (
+              <div className="p-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs font-bold">
+                <button
+                  disabled={masterCatalogPage <= 1}
+                  onClick={() => fetchMedicinesData(masterCatalogPage - 1)}
+                  className="px-3.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 disabled:opacity-40 rounded-xl cursor-pointer"
+                >
+                  السابقة ➔
+                </button>
+
+                <div className="text-slate-600">
+                  صفحة <span className="text-indigo-600 font-black">{masterCatalogPage}</span> من <span className="font-black">{masterCatalogTotalPages}</span> (إجمالي {masterCatalogTotalItems} صنف)
+                </div>
+
+                <button
+                  disabled={masterCatalogPage >= masterCatalogTotalPages}
+                  onClick={() => fetchMedicinesData(masterCatalogPage + 1)}
+                  className="px-3.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-100 disabled:opacity-40 rounded-xl cursor-pointer"
+                >
+                  التابعة ⬅
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3259,6 +3445,155 @@ export const SuperAdminView: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+      {/* SuperAdmin Edit Master Medicine Modal */}
+      {editingMedicine && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                  <Pill className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-slate-900">تعديل دواء في الدليل الموحد</h3>
+                  <p className="text-[11px] text-slate-500 font-medium">تحديث بيانات الصنف على مستوى كافة الصيدليات</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingMedicine(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateMedicineSubmit} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">الاسم التجاري (Trade Name) *</label>
+                <input
+                  type="text"
+                  required
+                  value={editMedForm.tradeName}
+                  onChange={(e) => setEditMedForm({ ...editMedForm, tradeName: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">الاسم العلمي (Scientific Name) *</label>
+                <input
+                  type="text"
+                  required
+                  value={editMedForm.scientificName}
+                  onChange={(e) => setEditMedForm({ ...editMedForm, scientificName: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">الشكل الدوائي</label>
+                  <input
+                    type="text"
+                    value={editMedForm.dosageForm}
+                    onChange={(e) => setEditMedForm({ ...editMedForm, dosageForm: e.target.value })}
+                    placeholder="أقراص، كبسول..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">التركيز</label>
+                  <input
+                    type="text"
+                    value={editMedForm.strength}
+                    onChange={(e) => setEditMedForm({ ...editMedForm, strength: e.target.value })}
+                    placeholder="500mg, 1g..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">الباركود الدولي</label>
+                  <input
+                    type="text"
+                    value={editMedForm.barcode}
+                    onChange={(e) => setEditMedForm({ ...editMedForm, barcode: e.target.value })}
+                    placeholder="رقم الباركود..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">الشركة المصنعة</label>
+                  <input
+                    type="text"
+                    value={editMedForm.manufacturer}
+                    onChange={(e) => setEditMedForm({ ...editMedForm, manufacturer: e.target.value })}
+                    placeholder="GSK, Pfizer..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">عدد الأشرطة بالعلبة</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={editMedForm.defaultUnitsPerPack}
+                    onChange={(e) => setEditMedForm({ ...editMedForm, defaultUnitsPerPack: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">حالة الدواء</label>
+                  <select
+                    value={editMedForm.isVerified ? 'true' : 'false'}
+                    onChange={(e) => setEditMedForm({ ...editMedForm, isVerified: e.target.value === 'true' })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                  >
+                    <option value="true">معتمد في الدليل الموحد ✅</option>
+                    <option value="false">غير مدقق (قيد المراجعة) ⏳</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex gap-2">
+                <button
+                  type="submit"
+                  disabled={savingMed}
+                  className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{savingMed ? 'جاري الحفظ...' : 'حفظ التعديلات في الدليل الموحد'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingMedicine(null)}
+                  className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SuperAdmin Add Master Medicine Modal */}
+      {showAddMedModalAdmin && (
+        <AddUnregisteredMedicineModal
+          onClose={() => setShowAddMedModalAdmin(false)}
+          onSuccess={(newMed) => {
+            setMessage({ type: 'success', text: `تم إضافة الدواء (${newMed.tradeName}) في قاعدة البيانات الرئيسية بنجاح!` });
+            fetchMedicinesData(1);
+          }}
+        />
       )}
     </div>
   );

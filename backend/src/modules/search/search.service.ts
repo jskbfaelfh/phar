@@ -308,10 +308,10 @@ export class SearchService {
     const governoratesCount = new Set(locations.map((l) => l.governorate).filter(Boolean)).size;
 
     return {
-      totalMedicines: Math.max(totalMedicines, 1200),
-      totalPharmacies: Math.max(totalPharmacies, 1),
+      totalMedicines,
+      totalPharmacies,
       onDutyPharmacies,
-      governoratesCount: Math.max(governoratesCount, 1),
+      governoratesCount,
     };
   }
 }

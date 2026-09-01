@@ -6,10 +6,14 @@ export interface ScannedInvoiceItem {
   matchedMedicineId: string | null;
   matchedTradeName: string;
   scientificName?: string;
+  strength?: string;
+  dosageForm?: string;
+  manufacturer?: string;
   barcode?: string;
   batchNumber?: string;
   expiryDate: string;
   quantityPacks: number;
+  bonusQuantity: number;
   unitsPerPack: number;
   purchasePricePack: number;
   sellingPricePack: number;
@@ -23,6 +27,8 @@ export interface ScannedInvoiceResult {
   supplierName: string;
   invoiceDate: string;
   totalAmount: number;
+  earlyDiscountDays?: number | null;
+  earlyDiscountPercent?: number | null;
   confidenceScore: number;
   items: ScannedInvoiceItem[];
   discrepanciesCount: number;
@@ -85,11 +91,13 @@ export class OcrAiService {
 
     for (const item of aiParsedData.items) {
       const rawName = String(item.rawName || '').trim();
+      const extractedTradeName = String(item.tradeName || rawName).trim();
       const barcode = item.barcode ? String(item.barcode).trim() : undefined;
-      const matchResult = await this.matchMedicineInMasterDb(rawName, barcode);
+      const matchResult = await this.matchMedicineInMasterDb(extractedTradeName, barcode);
 
       const purchasePrice = Number(item.purchasePricePack || 0);
       const quantityPacks = Number(item.quantityPacks || 1);
+      const bonusQuantity = Number(item.bonusQuantity || 0);
       const sellingPrice = Number(
         item.sellingPricePack ||
         (purchasePrice > 0 ? Math.round((purchasePrice * 1.25) / 250) * 250 : 0)
@@ -118,9 +126,13 @@ export class OcrAiService {
       }
 
       if (matchResult.confidence === 'LOW') {
-        discrepancies.push('⚠️ دواء غير مسجل بالدليل الموحد - يرجى مراجعة الاسم');
+        discrepancies.push('⚠️ دواء غير مسجل بالدليل الموحد - يرجى مراجعة الاسم والجرعة');
       } else if (matchResult.confidence === 'MEDIUM') {
         discrepancies.push(`💡 تم اقتراح المطابقة مع: ${matchResult.tradeName}`);
+      }
+
+      if (bonusQuantity > 0) {
+        discrepancies.push(`🎁 يشتمل على بونص مجاني (${bonusQuantity} عبوات هدايا)`);
       }
 
       if (discrepancies.length > 0) {
@@ -130,12 +142,16 @@ export class OcrAiService {
       matchedItems.push({
         rawName,
         matchedMedicineId: matchResult.medicine?.id || null,
-        matchedTradeName: matchResult.tradeName || rawName,
+        matchedTradeName: matchResult.tradeName || extractedTradeName,
         scientificName: matchResult.scientificName || item.scientificName || '',
+        strength: item.strength || matchResult.medicine?.strength || '',
+        dosageForm: item.dosageForm || matchResult.medicine?.dosageForm || '',
+        manufacturer: item.manufacturer || matchResult.medicine?.manufacturer || '',
         barcode: matchResult.barcode || item.barcode || '',
         batchNumber: item.batchNumber ? String(item.batchNumber).trim() : `BN-${Math.floor(1000 + Math.random() * 9000)}`,
         expiryDate,
         quantityPacks,
+        bonusQuantity,
         unitsPerPack: matchResult.medicine?.unitsPerPack || item.unitsPerPack || 1,
         purchasePricePack: purchasePrice,
         sellingPricePack: sellingPrice,
@@ -152,6 +168,8 @@ export class OcrAiService {
       supplierName: aiParsedData.supplierName ? String(aiParsedData.supplierName) : 'مذخر أدوية',
       invoiceDate: aiParsedData.invoiceDate ? String(aiParsedData.invoiceDate) : new Date().toISOString().slice(0, 10),
       totalAmount: Number(aiParsedData.totalAmount) || calculatedTotal,
+      earlyDiscountDays: aiParsedData.earlyDiscountDays ? Number(aiParsedData.earlyDiscountDays) : null,
+      earlyDiscountPercent: aiParsedData.earlyDiscountPercent ? Number(aiParsedData.earlyDiscountPercent) : null,
       confidenceScore: Math.max(70, 100 - discrepanciesCount * 4),
       items: matchedItems,
       discrepanciesCount,
@@ -180,7 +198,7 @@ export class OcrAiService {
     if (barcode && barcode.trim().length > 4) {
       const byBarcode: any[] = await this.prisma.$queryRawUnsafe(`
         SELECT id, trade_name as "tradeName", scientific_name as "scientificName", barcode, 
-               default_units_per_pack as "unitsPerPack"
+               default_units_per_pack as "unitsPerPack", strength, dosage_form as "dosageForm", manufacturer
         FROM public.medicines
         WHERE barcode = $1 LIMIT 1;
       `, barcode.trim());
@@ -205,7 +223,7 @@ export class OcrAiService {
     // 2. Exact match ILIKE
     const exactMatches: any[] = await this.prisma.$queryRawUnsafe(`
       SELECT id, trade_name as "tradeName", scientific_name as "scientificName", barcode, 
-             default_units_per_pack as "unitsPerPack"
+             default_units_per_pack as "unitsPerPack", strength, dosage_form as "dosageForm", manufacturer
       FROM public.medicines
       WHERE trade_name ILIKE $1 OR trade_name ILIKE $2
       LIMIT 1;
@@ -221,12 +239,12 @@ export class OcrAiService {
       };
     }
 
-    // 3. First Word / Prefix match (e.g. "Panadol" in "Panadol Extra 500mg 24 Tab")
+    // 3. First Word / Prefix match (e.g. "Amaryl 4mg" in "Amaryl")
     const words = cleanTerm.split(' ').filter((w) => w.length > 2);
     if (words.length > 0) {
       const prefixMatches: any[] = await this.prisma.$queryRawUnsafe(`
         SELECT id, trade_name as "tradeName", scientific_name as "scientificName", barcode, 
-               default_units_per_pack as "unitsPerPack"
+               default_units_per_pack as "unitsPerPack", strength, dosage_form as "dosageForm", manufacturer
         FROM public.medicines
         WHERE trade_name ILIKE $1
         ORDER BY LENGTH(trade_name) ASC
@@ -259,32 +277,50 @@ export class OcrAiService {
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
     const prompt = `
-      You are an expert pharmaceutical accountant and OCR scanner specializing in Iraqi pharmacy supplier invoices (فواتير مذاخر الأدوية).
-      Analyze the provided image of a wholesale pharmaceutical invoice and accurately extract the structured items in JSON format.
-      
+      You are an expert pharmaceutical accountant and OCR scanner specializing in Iraqi pharmacy supplier invoices (فواتير مذاخر الأدوية العراقية).
+      Analyze the provided image of a wholesale pharmaceutical invoice and accurately extract structured medicine items in JSON format.
+
+      CRITICAL NAME PARSING RULES:
+      1. "tradeName": MUST consist of (Clean Commercial Name + Strength/Dosage) ONLY. Example: "Amaryl 4mg", "Atacand Tab 8mg", "Atacand Plus 16/12.5mg", "Concor Cor 2.5mg", "Pregaline 75mg", "Suraxim 400mg", "Rabital H 300/12.5mg".
+      2. Do NOT include form words (Tab, Cap, Drop, Inj) or pack sizes (*30, *28, *6) or manufacturer names (Sanofi, Merck, Accord, AstraZeneca) or bonus text in tradeName, UNLESS the form/strength is part of the dosage definition (e.g. Amaryl 4mg).
+      3. "strength": Extract dosage strength into its own separate column e.g. "4mg", "8mg", "16/12.5mg", "2.5mg", "75mg", "400mg", "300/12.5mg", "100mg/1ml".
+      4. "dosageForm": Extract dosage form into its own separate column e.g. "Tab", "Cap", "Oral Drops", "Inj", "Eye Drops".
+      5. "unitsPerPack": Extract number of pills/strips/ml inside each box into its own column e.g. 30 for *30, 28 for *28, 6 for *6, 15 for 15ml.
+      6. "manufacturer": Extract manufacturer and country into its own column e.g. "Sanofi aventis - Germany", "AstraZeneca - Sweden", "Merck - Germany", "United - Jordan".
+      7. "quantityPacks": Extract main purchased paid box quantity (e.g. 10, 5, 4, 3).
+      8. "bonusQuantity": Extract free bonus boxes given (الهدية) e.g. 2 for "10-5free" with 5 quantity, 5 for "10-10free" with 5 quantity, otherwise 0.
+      11. "earlyDiscountDays": Extract early payment discount days threshold from notes at bottom of invoice if printed (e.g. 60 if invoice states "خلال شهرين" or 30 if "خلال شهر", otherwise null).
+      12. "earlyDiscountPercent": Extract early payment discount percentage from notes at bottom if printed (e.g. 3 if "خصم 3%" or 2 if "خصم 2%", otherwise null).
+
       Required Output JSON Format:
       {
-        "invoiceNumber": "string (invoice/bill reference number)",
-        "supplierName": "string (name of the drug warehouse / supplier)",
+        "invoiceNumber": "string",
+        "supplierName": "string",
         "invoiceDate": "YYYY-MM-DD",
-        "totalAmount": number (total invoice amount in Iraqi Dinars IQD),
+        "totalAmount": number,
+        "earlyDiscountDays": number or null,
+        "earlyDiscountPercent": number or null,
         "items": [
           {
-            "rawName": "string (Commercial/Trade name with dosage/form e.g. Amoxicillin 500mg Cap)",
-            "scientificName": "string or empty",
-            "batchNumber": "string (Lot or Batch number printed on the invoice e.g. B12345)",
-            "expiryDate": "YYYY-MM-DD",
-            "quantityPacks": number (number of boxes/packs purchased),
-            "unitsPerPack": number (strips or pieces per box, default 1),
-            "purchasePricePack": number (single pack wholesale purchase price in IQD),
-            "sellingPricePack": number (suggested retail price if listed, otherwise calculate 20-30% margin),
-            "barcode": "string or empty"
+            "rawName": "string (full raw text line)",
+            "tradeName": "string (Clean Commercial Name + Strength e.g. Amaryl 4mg)",
+            "strength": "string (e.g. 4mg)",
+            "dosageForm": "string (e.g. Tab)",
+            "unitsPerPack": number,
+            "manufacturer": "string",
+            "quantityPacks": number,
+            "bonusQuantity": number,
+            "purchasePricePack": number,
+            "sellingPricePack": number,
+            "scientificName": "string",
+            "barcode": "string",
+            "batchNumber": "string",
+            "expiryDate": "YYYY-MM-DD"
           }
         ]
       }
-      Important instructions:
-      - Clean prices into clean integers in IQD (remove commas, currency symbols).
-      - Return ONLY valid JSON format. Do NOT wrap in markdown backticks or explanations.
+
+      Important: Return ONLY valid JSON format. Do NOT wrap in markdown or explanations.
     `;
 
     // Try gemini-2.5-flash, fallback to gemini-1.5-flash

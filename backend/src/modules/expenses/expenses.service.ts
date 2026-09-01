@@ -7,6 +7,24 @@ export class ExpensesService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
+   * Helper to ensure expenses table exists in tenant schema
+   */
+  private async ensureTablesExist(schemaName: string) {
+    await this.prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "${schemaName}"."expenses" (
+        "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        "category" VARCHAR(50) NOT NULL DEFAULT 'OTHER',
+        "title" VARCHAR(255) NOT NULL,
+        "amount" DECIMAL(12, 2) NOT NULL,
+        "expense_date" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "recipient" VARCHAR(255),
+        "notes" TEXT,
+        "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  }
+
+  /**
    * Record a new operating expense in tenant schema
    */
   async createExpense(tenantId: string, dto: CreateExpenseDto) {
@@ -16,6 +34,8 @@ export class ExpensesService {
     }
 
     const schema = tenant.schemaName;
+    await this.ensureTablesExist(schema);
+
     const category = dto.category || 'OTHER';
     const expenseDate = dto.expenseDate ? new Date(dto.expenseDate) : new Date();
 
@@ -51,6 +71,8 @@ export class ExpensesService {
     if (!tenant || !tenant.schemaName) return { expenses: [], totalExpenses: 0, byCategory: {} };
 
     const schema = tenant.schemaName;
+    await this.ensureTablesExist(schema);
+
     let whereClauses: string[] = [];
 
     if (category && category !== 'ALL') {
@@ -114,6 +136,8 @@ export class ExpensesService {
     if (!tenant || !tenant.schemaName) throw new NotFoundException('الصيدلية غير متوفرة');
 
     const schema = tenant.schemaName;
+    await this.ensureTablesExist(schema);
+
     await this.prisma.$executeRawUnsafe(`
       DELETE FROM "${schema}"."expenses" WHERE id = $1;
     `, id);

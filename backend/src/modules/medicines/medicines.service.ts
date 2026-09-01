@@ -82,6 +82,94 @@ export class MedicinesService {
   }
 
   /**
+   * Get all master catalog medicines with filters & pagination for SuperAdmin
+   */
+  async getMasterCatalog(
+    search?: string,
+    filter: 'ALL' | 'VERIFIED' | 'UNVERIFIED' = 'ALL',
+    page: number = 1,
+    limit: number = 50,
+  ) {
+    const where: any = {};
+    if (filter === 'UNVERIFIED') {
+      where.isVerified = false;
+    } else if (filter === 'VERIFIED') {
+      where.isVerified = true;
+    }
+
+    if (search && search.trim().length > 0) {
+      const q = search.trim();
+      where.OR = [
+        { tradeName: { contains: q, mode: 'insensitive' } },
+        { scientificName: { contains: q, mode: 'insensitive' } },
+        { barcode: { contains: q, mode: 'insensitive' } },
+        { manufacturer: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    const take = Math.min(100, Math.max(10, Number(limit) || 50));
+    const skip = (Math.max(1, Number(page) || 1) - 1) * take;
+
+    const [items, total] = await Promise.all([
+      this.prisma.medicine.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+      }),
+      this.prisma.medicine.count({ where }),
+    ]);
+
+    const totalUnverified = await this.prisma.medicine.count({
+      where: { isVerified: false },
+    });
+
+    const totalVerified = await this.prisma.medicine.count({
+      where: { isVerified: true },
+    });
+
+    return {
+      items,
+      total,
+      totalVerified,
+      totalUnverified,
+      page: Math.max(1, Number(page) || 1),
+      totalPages: Math.ceil(total / take),
+      limit: take,
+    };
+  }
+
+  /**
+   * Update master medicine entry (SuperAdmin)
+   */
+  async updateMasterMedicine(id: string, dto: Partial<CreateMedicineDto>) {
+    const existing = await this.prisma.medicine.findUnique({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException('الدواء غير موجود');
+    }
+
+    const updated = await this.prisma.medicine.update({
+      where: { id },
+      data: {
+        ...(dto.tradeName ? { tradeName: dto.tradeName.trim() } : {}),
+        ...(dto.scientificName ? { scientificName: dto.scientificName.trim() } : {}),
+        ...(dto.dosageForm !== undefined ? { dosageForm: dto.dosageForm } : {}),
+        ...(dto.strength !== undefined ? { strength: dto.strength } : {}),
+        ...(dto.manufacturer !== undefined ? { manufacturer: dto.manufacturer } : {}),
+        ...(dto.barcode !== undefined ? { barcode: dto.barcode } : {}),
+        ...(dto.defaultUnitsPerPack ? { defaultUnitsPerPack: Number(dto.defaultUnitsPerPack) } : {}),
+        ...(dto.isVerified !== undefined ? { isVerified: dto.isVerified } : {}),
+      },
+    });
+
+    return {
+      success: true,
+      message: `تم تحديث بيانات الدواء (${updated.tradeName}) بنجاح`,
+      medicine: updated,
+    };
+  }
+
+  /**
    * Get list of unverified medicines submitted by pharmacies
    */
   async getUnverified(search?: string) {
