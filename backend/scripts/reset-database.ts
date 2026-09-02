@@ -1,4 +1,4 @@
-﻿import * as dotenv from 'dotenv';
+import * as dotenv from 'dotenv';
 dotenv.config();
 
 import { PrismaClient } from '@prisma/client';
@@ -9,7 +9,7 @@ const prisma = new PrismaClient({
 });
 
 async function resetDatabase() {
-  console.log('🧹 Starting full database reset...');
+  console.log('🧹 Starting TOTAL DATABASE WIPE of all medicines and pharmacy data...');
 
   // 1. Get all tenant schemas to drop
   const tenants = await prisma.tenant.findMany({ select: { schemaName: true } });
@@ -20,25 +20,25 @@ async function resetDatabase() {
     }
   }
 
-  // 2. Clear central search index, transfers, chains, tenants
-  console.log('🗑️ Clearing central search index and tenant records...');
+  // 2. Clear central search index, transfers, chains, tenants, and master catalog medicines
+  console.log('🗑️ Clearing central search index, tenant records, and master medicines catalog...');
   await prisma.centralSearchIndex.deleteMany({});
   await prisma.stockTransfer.deleteMany({});
   await prisma.tenant.deleteMany({});
   await prisma.pharmacyChain.deleteMany({});
+  await prisma.medicine.deleteMany({});
 
-  console.log('✅ Wiped all test pharmacies and transactions successfully!');
+  console.log('✅ Wiped all test medicines, catalog, and transactions successfully!');
 
-  // 3. Provision fresh demo pharmacy (pharmacy_yarmouk)
-  console.log('🏥 Provisioning clean demo pharmacy (صيدلية اليرموك)...');
-  const slug = 'pharmacy_yarmouk';
-  const schemaName = 'ph_pharmacy_yarmouk_01';
+  // 3. Provision clean active pharmacy tenant "h"
+  console.log('🏥 Provisioning clean active pharmacy (صيدلية H)...');
+  const slug = 'h';
+  const schemaName = 'ph_ph_h_ba0ff5';
 
-  // Drop schema if it exists
   await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE;`);
   await prisma.$executeRawUnsafe(`CREATE SCHEMA IF NOT EXISTS "${schemaName}";`);
 
-  // Create tables in demo schema
+  // Create tables in schema
   const statements = [
     `CREATE TABLE IF NOT EXISTS "${schemaName}".users (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -65,12 +65,15 @@ async function resetDatabase() {
     `CREATE TABLE IF NOT EXISTS "${schemaName}".inventory_batches (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       inventory_item_id UUID REFERENCES "${schemaName}".inventory_items(id) ON DELETE CASCADE,
+      supplier_id UUID,
+      purchase_id UUID,
       batch_number VARCHAR(100),
-      supplier_name VARCHAR(255),
-      supplier_invoice_number VARCHAR(100),
       purchase_price_pack DECIMAL(12, 2) NOT NULL,
+      selling_price_pack DECIMAL(12, 2) NOT NULL,
+      selling_price_unit DECIMAL(12, 2) NOT NULL,
       quantity_units_remaining INT NOT NULL,
       expiry_date DATE NOT NULL,
+      is_recalled BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT NOW()
     )`,
     `CREATE TABLE IF NOT EXISTS "${schemaName}".sales (
@@ -102,6 +105,7 @@ async function resetDatabase() {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name VARCHAR(255) NOT NULL,
       phone VARCHAR(50),
+      address TEXT,
       company_name VARCHAR(255),
       balance_due DECIMAL(12, 2) DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW()
@@ -109,21 +113,45 @@ async function resetDatabase() {
     `CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_invoices (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       supplier_id UUID REFERENCES "${schemaName}".suppliers(id) ON DELETE SET NULL,
+      supplier_name VARCHAR(255),
       invoice_number VARCHAR(100),
       total_amount DECIMAL(12, 2) NOT NULL,
       paid_amount DECIMAL(12, 2) NOT NULL,
       remaining_amount DECIMAL(12, 2) DEFAULT 0,
+      early_discount_days INT,
+      early_discount_percent DECIMAL(5,2),
+      early_discount_deadline TIMESTAMP,
+      early_discount_amount DECIMAL(12,2) DEFAULT 0,
+      early_discount_applied BOOLEAN DEFAULT FALSE,
+      early_discount_applied_amount DECIMAL(12,2) DEFAULT 0,
       payment_status VARCHAR(20) DEFAULT 'PAID',
       invoice_date TIMESTAMP DEFAULT NOW(),
       notes TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     )`,
+    `CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_invoice_items (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      purchase_invoice_id UUID REFERENCES "${schemaName}".purchase_invoices(id) ON DELETE CASCADE,
+      medicine_id UUID,
+      trade_name VARCHAR(255) NOT NULL,
+      scientific_name VARCHAR(255),
+      batch_number VARCHAR(100),
+      expiry_date DATE NOT NULL,
+      quantity_packs INT NOT NULL,
+      units_per_pack INT DEFAULT 1,
+      purchase_price_pack DECIMAL(12, 2) NOT NULL,
+      selling_price_pack DECIMAL(12, 2) NOT NULL,
+      total_cost DECIMAL(12, 2) NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`,
     `CREATE TABLE IF NOT EXISTS "${schemaName}".expenses (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       category VARCHAR(100) NOT NULL,
-      description TEXT,
+      title VARCHAR(255),
       amount DECIMAL(12, 2) NOT NULL,
       expense_date DATE DEFAULT CURRENT_DATE,
+      recipient VARCHAR(255),
+      notes TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     )`,
     `CREATE TABLE IF NOT EXISTS "${schemaName}".shift_closures (
@@ -145,44 +173,38 @@ async function resetDatabase() {
   }
 
   // Insert Tenant
-  const tenant = await prisma.tenant.create({
+  await prisma.tenant.create({
     data: {
-      name: 'صيدلية اليرموك نموذجية',
+      name: 'صيدلية H',
       slug,
       schemaName,
       governorate: 'بغداد',
-      district: 'اليرموك',
-      addressDetails: 'شارع الأربعين - مقابل جامع الشواف',
-      phone: '07701234567',
-      licenseKey: `LIC-YARMOUK-${Date.now()}`,
+      district: 'المنصور',
+      addressDetails: 'شارع الأميرة',
+      phone: '07800000000',
+      licenseKey: 'DAWAEE-EF7B6F46-2026',
       subscriptionStatus: 'ACTIVE',
       subscriptionEndsAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
     },
   });
 
-  // Insert Owner and Cashier Users
-  const passwordHash = await bcrypt.hash('Password123', 10);
+  // Insert Owner user with password "h"
+  const passwordHash = await bcrypt.hash('h', 10);
 
   await prisma.$executeRawUnsafe(
     `INSERT INTO "${schemaName}".users (name, username, password_hash, role)
-     VALUES ($1, $2, $3, 'OWNER'), ($4, $5, $3, 'CASHIER')`,
-    'د. أحمد اليرموك',
-    'yarmouk_owner',
-    passwordHash,
-    'كاشير صيدلية اليرموك',
-    'yarmouk_pos'
+     VALUES ($1, $2, $3, 'OWNER')`,
+    'صيدلية H',
+    'h',
+    passwordHash
   );
 
-  console.log('🎉 Reset Completed Successfully!');
+  console.log('🎉 TOTAL WIPE COMPLETE!');
   console.log('----------------------------------------------------');
-  console.log('🔑 Super Admin Credentials:');
-  console.log('   Username: superadmin');
-  console.log('   Password: Admin@Dawaee2026');
-  console.log('----------------------------------------------------');
-  console.log('🏥 Clean Demo Pharmacy Credentials:');
-  console.log('   Slug: pharmacy_yarmouk');
-  console.log('   Owner Username: yarmouk_owner | Password: Password123');
-  console.log('   Cashier Username: yarmouk_pos | Password: Password123');
+  console.log('📊 Current DB Status:');
+  console.log('   Medicines in Catalog: 0');
+  console.log('   Pharmacies: 1 (صيدلية H)');
+  console.log('   Pharmacy Login: Username: h | Password: h');
   console.log('----------------------------------------------------');
 }
 

@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
@@ -7,115 +8,133 @@ import { CreatePurchaseDto } from './dto/create-purchase.dto';
 export class PurchasesService {
   private static readonly verifiedSchemas = new Set<string>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   /**
    * Helper to ensure all tables exist in the tenant schema
    */
   private async ensureTablesExist(schemaName: string) {
-    const statements = [
-      `ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS custom_name VARCHAR(255);`,
-      `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS supplier_id UUID;`,
-      `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS purchase_id UUID;`,
-      `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS is_recalled BOOLEAN DEFAULT FALSE;`,
-      `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_pack DECIMAL(12, 2);`,
-      `ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_unit DECIMAL(12, 2);`,
-      `ALTER TABLE "${schemaName}".purchase_invoice_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();`,
-      `ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_days INT;`,
-      `ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_percent DECIMAL(5, 2);`,
-      `ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_deadline DATE;`,
-      `ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_amount DECIMAL(12, 2);`,
-      `ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_applied BOOLEAN DEFAULT FALSE;`,
-      `ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_applied_amount DECIMAL(12, 2) DEFAULT 0;`,
-      `CREATE TABLE IF NOT EXISTS "${schemaName}".suppliers (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        name VARCHAR(255) NOT NULL,
-        phone VARCHAR(50),
-        address TEXT,
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      );`,
-      `CREATE TABLE IF NOT EXISTS "${schemaName}".purchases (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        invoice_number VARCHAR(100),
-        supplier_id UUID,
-        supplier_name VARCHAR(255),
-        total_gross_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-        total_discount_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-        net_total_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-        paid_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-        remaining_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-        payment_status VARCHAR(20) NOT NULL DEFAULT 'PAID',
-        due_date DATE,
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      );`,
-      `CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_items (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        purchase_id UUID,
-        inventory_item_id UUID,
-        quantity_packs INT NOT NULL,
-        bonus_packs INT NOT NULL DEFAULT 0,
-        units_per_pack INT NOT NULL DEFAULT 1,
-        purchase_price_pack DECIMAL(12, 2) NOT NULL,
-        discount_percent DECIMAL(5, 2) NOT NULL DEFAULT 0,
-        net_cost_pack DECIMAL(12, 2) NOT NULL,
-        selling_price_pack DECIMAL(12, 2) NOT NULL,
-        selling_price_unit DECIMAL(12, 2) NOT NULL,
-        expiry_date DATE,
-        batch_number VARCHAR(100)
-      );`,
-      `CREATE TABLE IF NOT EXISTS "${schemaName}".supplier_payments (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        supplier_id UUID,
-        purchase_id UUID,
-        amount DECIMAL(12, 2) NOT NULL,
-        payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
-        payment_method VARCHAR(50) DEFAULT 'CASH',
-        receipt_number VARCHAR(100),
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      );`,
-      `CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_invoices (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        invoice_number VARCHAR(100) NOT NULL,
-        supplier_id UUID,
-        supplier_name VARCHAR(255),
-        invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
-        total_amount DECIMAL(12, 2) NOT NULL,
-        paid_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-        remaining_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-        notes TEXT,
-        items_count INT NOT NULL DEFAULT 0,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      );`,
-      `CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_invoice_items (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        purchase_invoice_id UUID,
-        medicine_id UUID,
-        trade_name VARCHAR(255) NOT NULL,
-        scientific_name VARCHAR(255),
-        batch_number VARCHAR(100),
-        expiry_date DATE NOT NULL,
-        quantity_packs INT NOT NULL,
-        units_per_pack INT NOT NULL DEFAULT 1,
-        purchase_price_pack DECIMAL(12, 2) NOT NULL,
-        selling_price_pack DECIMAL(12, 2) NOT NULL,
-        total_cost DECIMAL(12, 2) NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW()
-      );`
-    ];
-
-    for (const statement of statements) {
-      try {
-        await this.prisma.$executeRawUnsafe(statement);
-      } catch (err) {
-        // Continue if statement already applied
-      }
+    if (PurchasesService.verifiedSchemas.has(schemaName)) {
+      return;
     }
 
-    PurchasesService.verifiedSchemas.add(schemaName);
+    try {
+      const sqlBlock = `DO $$
+BEGIN
+  CREATE TABLE IF NOT EXISTS "${schemaName}".suppliers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    phone VARCHAR(50),
+    address TEXT,
+    company_name VARCHAR(255),
+    balance_due DECIMAL(12, 2) DEFAULT 0,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS "${schemaName}".purchases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    invoice_number VARCHAR(100),
+    supplier_id UUID,
+    supplier_name VARCHAR(255),
+    total_gross_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    total_discount_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    net_total_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    paid_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    remaining_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    payment_status VARCHAR(20) NOT NULL DEFAULT 'PAID',
+    due_date DATE,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    purchase_id UUID,
+    inventory_item_id UUID,
+    quantity_packs INT NOT NULL,
+    bonus_packs INT NOT NULL DEFAULT 0,
+    units_per_pack INT NOT NULL DEFAULT 1,
+    purchase_price_pack DECIMAL(12, 2) NOT NULL,
+    discount_percent DECIMAL(5, 2) NOT NULL DEFAULT 0,
+    net_cost_pack DECIMAL(12, 2) NOT NULL,
+    selling_price_pack DECIMAL(12, 2) NOT NULL,
+    selling_price_unit DECIMAL(12, 2) NOT NULL,
+    expiry_date DATE,
+    batch_number VARCHAR(100)
+  );
+  CREATE TABLE IF NOT EXISTS "${schemaName}".supplier_payments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    supplier_id UUID,
+    purchase_id UUID,
+    amount DECIMAL(12, 2) NOT NULL,
+    payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    payment_method VARCHAR(50) DEFAULT 'CASH',
+    receipt_number VARCHAR(100),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_invoices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    invoice_number VARCHAR(100) NOT NULL,
+    supplier_id UUID,
+    supplier_name VARCHAR(255),
+    invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    total_amount DECIMAL(12, 2) NOT NULL,
+    paid_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    remaining_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    early_discount_days INT,
+    early_discount_percent DECIMAL(5, 2),
+    early_discount_deadline DATE,
+    early_discount_amount DECIMAL(12, 2),
+    early_discount_applied BOOLEAN DEFAULT FALSE,
+    early_discount_applied_amount DECIMAL(12, 2) DEFAULT 0,
+    notes TEXT,
+    items_count INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+  );
+  CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_invoice_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    purchase_invoice_id UUID,
+    medicine_id UUID,
+    trade_name VARCHAR(255) NOT NULL,
+    scientific_name VARCHAR(255),
+    batch_number VARCHAR(100),
+    expiry_date DATE NOT NULL,
+    quantity_packs INT NOT NULL,
+    units_per_pack INT NOT NULL DEFAULT 1,
+    purchase_price_pack DECIMAL(12, 2) NOT NULL,
+    selling_price_pack DECIMAL(12, 2) NOT NULL,
+    total_cost DECIMAL(12, 2) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+  ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS custom_name VARCHAR(255);
+  ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS supplier_id UUID;
+  ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS purchase_id UUID;
+  ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS is_recalled BOOLEAN DEFAULT FALSE;
+  ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_pack DECIMAL(12, 2);
+  ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_unit DECIMAL(12, 2);
+  ALTER TABLE "${schemaName}".purchase_invoice_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+  ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS supplier_name VARCHAR(255);
+  ALTER TABLE "${schemaName}".suppliers ADD COLUMN IF NOT EXISTS address TEXT;
+  ALTER TABLE "${schemaName}".suppliers ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);
+  ALTER TABLE "${schemaName}".suppliers ADD COLUMN IF NOT EXISTS balance_due DECIMAL(12, 2) DEFAULT 0;
+  ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_days INT;
+  ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_percent DECIMAL(5, 2);
+  ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_deadline DATE;
+  ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_amount DECIMAL(12, 2);
+  ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_applied BOOLEAN DEFAULT FALSE;
+  ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_applied_amount DECIMAL(12, 2) DEFAULT 0;
+END $$;`;
+
+      await this.prisma.$executeRawUnsafe(sqlBlock);
+      PurchasesService.verifiedSchemas.add(schemaName);
+    } catch (err: any) {
+      // Continue if schema tables exist
+      PurchasesService.verifiedSchemas.add(schemaName);
+    }
   }
 
   /**
@@ -220,6 +239,8 @@ export class PurchasesService {
 
     const invoiceId = invoiceInsert[0].id;
 
+    const processedMedicineIds: string[] = [];
+
     // 3. Process items, create medicines if needed, update inventory items & insert batches
     for (const item of dto.items) {
       const quantityPacks = Number(item.quantityPacks) || 1;
@@ -248,7 +269,7 @@ export class PurchasesService {
             INSERT INTO public.medicines (
               "id", "trade_name", "scientific_name", "barcode", "default_units_per_pack", "is_verified"
             ) VALUES (
-              gen_random_uuid(), $1, $2, $3, $4, true
+              gen_random_uuid(), $1, $2, $3, $4, false
             ) RETURNING id;
           `,
             finalTradeName,
@@ -258,6 +279,10 @@ export class PurchasesService {
           );
           medicineId = createdMed[0].id;
         }
+      }
+
+      if (medicineId) {
+        processedMedicineIds.push(medicineId);
       }
 
       // Find or create InventoryItem in Tenant schema
@@ -369,6 +394,15 @@ export class PurchasesService {
         invoiceNumber,
         `دفعة مسددة عند استلام فاتورة ${invoiceNumber}`
       );
+    }
+
+    // 5. Emit background sync event to update CentralSearchIndex for Public Search
+    if (processedMedicineIds.length > 0) {
+      this.eventEmitter.emit('inventory.synced', {
+        tenantId,
+        schemaName: schema,
+        medicineIds: Array.from(new Set(processedMedicineIds)),
+      });
     }
 
     return {

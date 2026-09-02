@@ -41,17 +41,13 @@ export class InventoryService {
 
     try {
       const ddl = `
-        ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS custom_name VARCHAR(255);
-        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS supplier_id UUID;
-        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS purchase_id UUID;
-        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS is_recalled BOOLEAN DEFAULT FALSE;
-        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_pack DECIMAL(12, 2);
-        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_unit DECIMAL(12, 2);
         CREATE TABLE IF NOT EXISTS "${schemaName}".suppliers (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           name VARCHAR(255) NOT NULL,
           phone VARCHAR(50),
           address TEXT,
+          company_name VARCHAR(255),
+          balance_due DECIMAL(12, 2) DEFAULT 0,
           notes TEXT,
           created_at TIMESTAMP DEFAULT NOW()
         );
@@ -98,20 +94,69 @@ export class InventoryService {
           created_at TIMESTAMP DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS "idx_${schemaName}_supp_pay_dt" ON "${schemaName}".supplier_payments (created_at);
+        CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_invoices (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          invoice_number VARCHAR(100) NOT NULL,
+          supplier_id UUID,
+          supplier_name VARCHAR(255),
+          invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
+          total_amount DECIMAL(12, 2) NOT NULL,
+          paid_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+          remaining_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+          early_discount_days INT,
+          early_discount_percent DECIMAL(5, 2),
+          early_discount_deadline DATE,
+          early_discount_amount DECIMAL(12, 2),
+          early_discount_applied BOOLEAN DEFAULT FALSE,
+          early_discount_applied_amount DECIMAL(12, 2) DEFAULT 0,
+          notes TEXT,
+          items_count INT NOT NULL DEFAULT 0,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_invoice_items (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          purchase_invoice_id UUID,
+          medicine_id UUID,
+          trade_name VARCHAR(255) NOT NULL,
+          scientific_name VARCHAR(255),
+          batch_number VARCHAR(100),
+          expiry_date DATE NOT NULL,
+          quantity_packs INT NOT NULL,
+          units_per_pack INT NOT NULL DEFAULT 1,
+          purchase_price_pack DECIMAL(12, 2) NOT NULL,
+          selling_price_pack DECIMAL(12, 2) NOT NULL,
+          total_cost DECIMAL(12, 2) NOT NULL,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS custom_name VARCHAR(255);
         ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS is_public_visible BOOLEAN DEFAULT TRUE;
         ALTER TABLE "${schemaName}".inventory_items ADD COLUMN IF NOT EXISTS shelf_location VARCHAR(100);
+        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS supplier_id UUID;
+        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS purchase_id UUID;
+        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS is_recalled BOOLEAN DEFAULT FALSE;
+        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_pack DECIMAL(12, 2);
+        ALTER TABLE "${schemaName}".inventory_batches ADD COLUMN IF NOT EXISTS selling_price_unit DECIMAL(12, 2);
+        ALTER TABLE "${schemaName}".suppliers ADD COLUMN IF NOT EXISTS address TEXT;
+        ALTER TABLE "${schemaName}".suppliers ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);
+        ALTER TABLE "${schemaName}".suppliers ADD COLUMN IF NOT EXISTS balance_due DECIMAL(12, 2) DEFAULT 0;
+        ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS supplier_name VARCHAR(255);
+        ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_days INT;
+        ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_percent DECIMAL(5, 2);
+        ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_deadline DATE;
+        ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_amount DECIMAL(12, 2);
+        ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_applied BOOLEAN DEFAULT FALSE;
+        ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_applied_amount DECIMAL(12, 2) DEFAULT 0;
       `;
+      const sqlBlock = `DO $$
+BEGIN
+${ddl}
+END $$;`;
 
-      const statements = ddl
-        .split(';')
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      for (const sql of statements) {
-        await this.prisma.$executeRawUnsafe(sql);
-      }
+      await this.prisma.$executeRawUnsafe(sqlBlock);
       InventoryService.verifiedSchemas.add(schemaName);
     } catch (err: any) {
+      InventoryService.verifiedSchemas.add(schemaName);
       this.logger.warn(`Could not verify purchase tables for ${schemaName}: ${err.message}`);
     }
   }

@@ -1,5 +1,6 @@
-﻿import { Injectable, Logger, BadRequestException } from "@nestjs/common";
+import { Injectable, Logger, BadRequestException } from "@nestjs/common";
 import { PrismaService } from "../../database/prisma.service";
+import { LocalDbService } from "../../database/local-db.service";
 import { TenantContextService } from "../../common/tenant/tenant-context.service";
 
 @Injectable()
@@ -8,8 +9,13 @@ export class BackupService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly localDb: LocalDbService,
     private readonly tenantContext: TenantContextService,
   ) {}
+
+  getLocalDbFilePath(): string {
+    return this.localDb.getDbFilePath();
+  }
 
   /**
    * Export all Tenant Pharmacy data for backup

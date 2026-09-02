@@ -169,6 +169,8 @@ export class ProvisioningService {
         selling_price_pack DECIMAL(12, 2) NOT NULL,
         selling_price_unit DECIMAL(12, 2) NOT NULL,
         min_alert_units INT DEFAULT 5,
+        is_public_visible BOOLEAN DEFAULT TRUE,
+        shelf_location VARCHAR(100),
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       )`,
@@ -224,6 +226,8 @@ export class ProvisioningService {
         name VARCHAR(255) NOT NULL,
         phone VARCHAR(50),
         address TEXT,
+        company_name VARCHAR(255),
+        balance_due DECIMAL(12, 2) DEFAULT 0,
         notes TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       )`,
@@ -270,6 +274,41 @@ export class ProvisioningService {
         created_at TIMESTAMP DEFAULT NOW()
       )`,
       `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_supp_pay_dt" ON "${schemaName}".supplier_payments (created_at)`,
+      `CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_invoices (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        invoice_number VARCHAR(100) NOT NULL,
+        supplier_id UUID,
+        supplier_name VARCHAR(255),
+        invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        total_amount DECIMAL(12, 2) NOT NULL,
+        paid_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+        remaining_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+        early_discount_days INT,
+        early_discount_percent DECIMAL(5, 2),
+        early_discount_deadline DATE,
+        early_discount_amount DECIMAL(12, 2),
+        early_discount_applied BOOLEAN DEFAULT FALSE,
+        early_discount_applied_amount DECIMAL(12, 2) DEFAULT 0,
+        notes TEXT,
+        items_count INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )`,
+      `CREATE TABLE IF NOT EXISTS "${schemaName}".purchase_invoice_items (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        purchase_invoice_id UUID,
+        medicine_id UUID,
+        trade_name VARCHAR(255) NOT NULL,
+        scientific_name VARCHAR(255),
+        batch_number VARCHAR(100),
+        expiry_date DATE NOT NULL,
+        quantity_packs INT NOT NULL,
+        units_per_pack INT NOT NULL DEFAULT 1,
+        purchase_price_pack DECIMAL(12, 2) NOT NULL,
+        selling_price_pack DECIMAL(12, 2) NOT NULL,
+        total_cost DECIMAL(12, 2) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )`,
     ];
 
     for (const sql of statements) {
