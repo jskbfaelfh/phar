@@ -125,8 +125,13 @@ BEGIN
   ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_percent DECIMAL(5, 2);
   ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_deadline DATE;
   ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_amount DECIMAL(12, 2);
-  ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_applied BOOLEAN DEFAULT FALSE;
   ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS early_discount_applied_amount DECIMAL(12, 2) DEFAULT 0;
+  ALTER TABLE "${schemaName}".purchase_invoices ADD COLUMN IF NOT EXISTS discount_tiers JSONB;
+  ALTER TABLE "${schemaName}".purchase_invoice_items ALTER COLUMN expiry_date DROP NOT NULL;
+  ALTER TABLE "${schemaName}".purchase_invoice_items ADD COLUMN IF NOT EXISTS bonus_packs INT DEFAULT 0;
+  ALTER TABLE "${schemaName}".purchase_invoice_items ADD COLUMN IF NOT EXISTS discount_percent DECIMAL(5, 2) DEFAULT 0;
+  ALTER TABLE "${schemaName}".purchase_items ALTER COLUMN expiry_date DROP NOT NULL;
+  ALTER TABLE "${schemaName}".inventory_batches ALTER COLUMN expiry_date DROP NOT NULL;
 END $$;`;
 
       await this.prisma.$executeRawUnsafe(sqlBlock);
@@ -212,13 +217,17 @@ END $$;`;
     );
 
     // 2. Insert into purchase_invoices table for multi-view compatibility
+    const discountTiersJson = dto.discountTiers && Array.isArray(dto.discountTiers) && dto.discountTiers.length > 0
+      ? JSON.stringify(dto.discountTiers)
+      : null;
+
     const invoiceInsert = await this.prisma.$queryRawUnsafe<Array<{ id: string }>>(`
       INSERT INTO "${schema}"."purchase_invoices" (
         "id", "invoice_number", "supplier_id", "supplier_name", "invoice_date",
         "total_amount", "paid_amount", "remaining_amount", "notes", "items_count",
-        "early_discount_days", "early_discount_percent", "early_discount_deadline", "early_discount_amount"
+        "early_discount_days", "early_discount_percent", "early_discount_deadline", "early_discount_amount", "discount_tiers"
       ) VALUES (
-        $1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+        $1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb
       ) RETURNING id;
     `,
       purchaseId,
@@ -234,7 +243,8 @@ END $$;`;
       earlyDiscountDays,
       earlyDiscountPercent,
       earlyDiscountDeadline,
-      earlyDiscountAmount
+      earlyDiscountAmount,
+      discountTiersJson
     );
 
     const invoiceId = invoiceInsert[0].id;
@@ -244,13 +254,26 @@ END $$;`;
     // 3. Process items, create medicines if needed, update inventory items & insert batches
     for (const item of dto.items) {
       const quantityPacks = Number(item.quantityPacks) || 1;
+      const bonusPacks = Number(item.bonusPacks) || 0;
       const purchasePricePack = Number(item.purchasePricePack) || 0;
-      const sellingPricePack = Number(item.sellingPricePack) || Math.round((purchasePricePack * 1.25) / 250) * 250;
+      const discountPercent = Number(item.discountPercent) || 0;
+      const netCostPack = purchasePricePack * (1 - discountPercent / 100);
       const unitsPerPack = Number(item.unitsPerPack) || 1;
-      const totalCost = quantityPacks * purchasePricePack;
-      const expiryDate = new Date(item.expiryDate);
-      const totalUnits = Math.round(quantityPacks * unitsPerPack);
-      const sellingPriceUnit = unitsPerPack > 0 ? sellingPricePack / unitsPerPack : sellingPricePack;
+      const sellingPricePack = Number(item.sellingPricePack) || 0;
+      const sellingPriceUnit = unitsPerPack > 0 ? (sellingPricePack / unitsPerPack) : sellingPricePack;
+      const totalCost = quantityPacks * netCostPack;
+      const totalUnits = Math.round((quantityPacks + bonusPacks) * unitsPerPack);
+
+      let expiryDate: Date | null = null;
+      if (item.expiryDate && String(item.expiryDate).trim() && String(item.expiryDate).trim() !== 'null') {
+        const d = new Date(item.expiryDate);
+        if (!isNaN(d.getTime())) expiryDate = d;
+      }
+
+      const batchNumber = (item.batchNumber && String(item.batchNumber).trim() && String(item.batchNumber).trim() !== 'null')
+        ? String(item.batchNumber).trim()
+        : `BN-${Date.now().toString().slice(-4)}`;
+
       const finalTradeName = (item.customTradeName || item.tradeName || 'دواء جديد').trim();
 
       // Ensure medicine exists in public.medicines
@@ -297,20 +320,24 @@ END $$;`;
       if (!inventoryItem) {
         const createdInv = await this.prisma.$queryRawUnsafe<Array<{ id: string }>>(`
           INSERT INTO "${schema}"."inventory_items" (
-            "medicine_id", "custom_name", "units_per_pack", "selling_price_pack", "selling_price_unit", "min_alert_units", "is_public_visible"
+            "medicine_id", "custom_name", "units_per_pack", "selling_price_pack", "selling_price_unit", "min_alert_units", "is_public_visible", "shelf_location"
           ) VALUES (
-            $1::uuid, $2, $3, $4, $5, 5, true
+            $1::uuid, $2, $3, $4, $5, 5, true, $6
           ) RETURNING id;
-        `, medicineId, finalTradeName, unitsPerPack, sellingPricePack, sellingPriceUnit);
+        `, medicineId, finalTradeName, unitsPerPack, sellingPricePack, sellingPriceUnit, item.shelfLocation?.trim() || null);
         inventoryItemId = createdInv[0].id;
       } else {
         inventoryItemId = inventoryItem.id;
-        // Update price
+        // Update price and shelf
         await this.prisma.$executeRawUnsafe(`
           UPDATE "${schema}"."inventory_items"
-          SET "selling_price_pack" = $1, "selling_price_unit" = $2, "custom_name" = COALESCE($3, "custom_name"), "updated_at" = CURRENT_TIMESTAMP
-          WHERE "id" = $4::uuid;
-        `, sellingPricePack, sellingPriceUnit, finalTradeName, inventoryItemId);
+          SET "selling_price_pack" = CASE WHEN $1 > 0 THEN $1 ELSE "selling_price_pack" END,
+              "selling_price_unit" = CASE WHEN $2 > 0 THEN $2 ELSE "selling_price_unit" END,
+              "custom_name" = COALESCE($3, "custom_name"),
+              "shelf_location" = COALESCE($4, "shelf_location"),
+              "updated_at" = CURRENT_TIMESTAMP
+          WHERE "id" = $5::uuid;
+        `, sellingPricePack, sellingPriceUnit, finalTradeName, item.shelfLocation?.trim() || null, inventoryItemId);
       }
 
       // Insert into purchase_items
@@ -320,39 +347,44 @@ END $$;`;
           "purchase_price_pack", "discount_percent", "net_cost_pack", "selling_price_pack", "selling_price_unit",
           "expiry_date", "batch_number"
         ) VALUES (
-          $1::uuid, $2::uuid, $3, 0, $4, $5, 0, $5, $6, $7, $8, $9
+          $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
         );
       `,
         purchaseId,
         inventoryItemId,
         quantityPacks,
+        bonusPacks,
         unitsPerPack,
         purchasePricePack,
+        discountPercent,
+        netCostPack,
         sellingPricePack,
         sellingPriceUnit,
         expiryDate,
-        item.batchNumber || `BN-${Date.now().toString().slice(-4)}`
+        batchNumber
       );
 
       // Insert into purchase_invoice_items
       await this.prisma.$executeRawUnsafe(`
         INSERT INTO "${schema}"."purchase_invoice_items" (
           "purchase_invoice_id", "medicine_id", "trade_name", "scientific_name",
-          "batch_number", "expiry_date", "quantity_packs", "units_per_pack",
-          "purchase_price_pack", "selling_price_pack", "total_cost"
+          "batch_number", "expiry_date", "quantity_packs", "bonus_packs", "units_per_pack",
+          "purchase_price_pack", "discount_percent", "selling_price_pack", "total_cost"
         ) VALUES (
-          $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11
+          $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
         );
       `,
         invoiceId,
         medicineId,
         finalTradeName,
         item.scientificName || null,
-        item.batchNumber || `BN-${Date.now().toString().slice(-4)}`,
+        batchNumber,
         expiryDate,
         quantityPacks,
+        bonusPacks,
         unitsPerPack,
         purchasePricePack,
+        discountPercent,
         sellingPricePack,
         totalCost
       );
@@ -369,7 +401,7 @@ END $$;`;
         inventoryItemId,
         finalSupplierId,
         purchaseId,
-        item.batchNumber || `BN-${Date.now().toString().slice(-4)}`,
+        batchNumber,
         purchasePricePack,
         sellingPricePack,
         sellingPriceUnit,

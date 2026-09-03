@@ -27,12 +27,16 @@ export class PurchaseItemDto {
   batchNumber?: string;
 
   @IsString()
-  @IsNotEmpty()
-  expiryDate!: string;
+  @IsOptional()
+  expiryDate?: string;
 
   @IsNumber()
   @Min(0.01)
   quantityPacks!: number;
+
+  @IsNumber()
+  @IsOptional()
+  bonusPacks?: number;
 
   @IsNumber()
   @Min(1)
@@ -43,8 +47,16 @@ export class PurchaseItemDto {
   purchasePricePack!: number;
 
   @IsNumber()
+  @IsOptional()
+  discountPercent?: number;
+
+  @IsNumber()
   @Min(0)
   sellingPricePack!: number;
+
+  @IsString()
+  @IsOptional()
+  shelfLocation?: string;
 }
 
 export class CreatePurchaseDto {
@@ -80,6 +92,10 @@ export class CreatePurchaseDto {
   @IsNumber()
   @IsOptional()
   earlyDiscountPercent?: number;
+
+  @IsArray()
+  @IsOptional()
+  discountTiers?: any[];
 
   @IsString()
   @IsOptional()

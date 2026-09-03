@@ -16,10 +16,19 @@ export interface ScannedInvoiceItem {
   bonusQuantity: number;
   unitsPerPack: number;
   purchasePricePack: number;
+  discountPercent: number;
   sellingPricePack: number;
+  sellingPriceUnit?: number;
+  shelfLocation?: string;
   totalCost: number;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
   discrepancies: string[];
+}
+
+export interface DiscountTier {
+  monthIndex: number;
+  daysLimit: number;
+  discountPercent: number;
 }
 
 export interface ScannedInvoiceResult {
@@ -29,10 +38,73 @@ export interface ScannedInvoiceResult {
   totalAmount: number;
   earlyDiscountDays?: number | null;
   earlyDiscountPercent?: number | null;
+  discountMonths?: number | null;
+  discountTiers?: DiscountTier[];
   confidenceScore: number;
   items: ScannedInvoiceItem[];
   discrepanciesCount: number;
   rawExtractedText?: string;
+}
+
+/**
+ * Helper to ensure tradeName is strictly [Trade Name] + [Strength]
+ * Completely removes dosage forms (tab, cap, syrup, etc.) and pack/company noise
+ */
+function cleanTradeNameWithStrength(rawName: string, strengthProvided?: string): { cleanName: string; cleanStrength: string } {
+  let text = String(rawName || '').replace(/[\*\#\_]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // Extract strength if not provided
+  const strengthRegex = /(\b\d+(?:\.\d+)?\s*(?:mg|g|mcg|ml|%|iu|IU|u|U)(?:\/\d+(?:\.\d+)?\s*(?:ml|mg))?\b|\b\d+\/\d+\s*mg\b|\b\d+\/\d+\b)/i;
+  let strength = strengthProvided?.trim() || '';
+  if (!strength) {
+    const sm = text.match(strengthRegex);
+    if (sm) {
+      strength = sm[1].trim();
+    }
+  }
+
+  // Remove strength temporarily from text to clean base name
+  let base = text;
+  if (strength) {
+    base = base.replace(new RegExp(strength.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ');
+  }
+
+  // Strip dosage forms strictly
+  const formPatterns = [
+    /\b(?:tabs?|tablets?|taps?|أقراص|حبوب)\b/gi,
+    /\b(?:caps?|capsules?|كبسول)\b/gi,
+    /\b(?:syrups?|syr|شراب)\b/gi,
+    /\b(?:susp(?:ension)?|معلق)\b/gi,
+    /\b(?:inj(?:ection)?|amp(?:oule)?|vial|حقن|امبول|فيال)\b/gi,
+    /\b(?:drops?|eye drops?|ear drops?|قطرة|قطرات)\b/gi,
+    /\b(?:creams?|cr|كريم)\b/gi,
+    /\b(?:ointments?|oint|مرهم)\b/gi,
+    /\b(?:gels?|جل)\b/gi,
+    /\b(?:supp(?:ositor(?:y|ies))?|تحاميل)\b/gi,
+    /\b(?:sprays?|بخاخ)\b/gi,
+    /\b(?:infusions?|i\.v\.|iv|محلول وريدي|محلول)\b/gi,
+    /\b(?:lotions?|لوشن)\b/gi,
+    /\b(?:mouthwash|غسول)\b/gi,
+    /\b(?:powders?|بودرة|ساشيت|sachets?)\b/gi,
+  ];
+
+  for (const fp of formPatterns) {
+    base = base.replace(fp, ' ');
+  }
+
+  // Strip pack/bonus/packaging noise & common pharmaceutical companies
+  base = base.replace(/\b\d+\s*(?:tab|cap|amp|vial|ml|s)\b/gi, ' ');
+  base = base.replace(/\b(?:باكيت|شريط|علبة|قطعة|box|strip|pack|free|bonus|هدية)\b/gi, ' ');
+  base = base.replace(/\b(?:sanofi|merck|accord|astrazeneca|novartis|pfizer|gula|sdi|hikma|julphar|dar al dawa|awamedica|acino|glaxo|gsk)\b/gi, ' ');
+  base = base.replace(/[\(\)\[\]\-\+\:\;]+/g, ' ');
+  base = base.replace(/\s+/g, ' ').trim();
+
+  // Re-assemble strictly: [Clean Name] [Strength]
+  const finalTradeName = strength ? `${base} ${strength}`.trim() : base.trim();
+  return {
+    cleanName: finalTradeName || text,
+    cleanStrength: strength,
+  };
 }
 
 @Injectable()
@@ -91,71 +163,85 @@ export class OcrAiService {
 
     for (const item of aiParsedData.items) {
       const rawName = String(item.rawName || '').trim();
-      const extractedTradeName = String(item.tradeName || rawName).trim();
+
+      // Strict rule: Trade Name + Strength ONLY (no forms, no packaging, no company noise)
+      const { cleanName, cleanStrength } = cleanTradeNameWithStrength(
+        item.tradeName || rawName,
+        item.strength
+      );
+
       const barcode = item.barcode ? String(item.barcode).trim() : undefined;
-      const matchResult = await this.matchMedicineInMasterDb(extractedTradeName, barcode);
+      const matchResult = await this.matchMedicineInMasterDb(cleanName, barcode);
 
       const purchasePrice = Number(item.purchasePricePack || 0);
       const quantityPacks = Number(item.quantityPacks || 1);
       const bonusQuantity = Number(item.bonusQuantity || 0);
-      const sellingPrice = Number(
-        item.sellingPricePack ||
-        (purchasePrice > 0 ? Math.round((purchasePrice * 1.25) / 250) * 250 : 0)
-      );
+      const discountPercent = Number(item.discountPercent || 0);
 
-      // Validate dates & discrepancies
+      // ZERO GUESSWORK: Only use sellingPricePack if printed, do NOT guess price
+      const sellingPrice = Number(item.sellingPricePack || 0);
+
+      // ZERO GUESSWORK: Do NOT guess expiry dates (+2 years)
       const discrepancies: string[] = [];
-      let expiryDate = item.expiryDate || '';
-
-      if (!expiryDate || expiryDate === 'N/A') {
-        const futureDate = new Date();
-        futureDate.setFullYear(futureDate.getFullYear() + 2);
-        expiryDate = futureDate.toISOString().slice(0, 10);
-        discrepancies.push('تاريخ الصلاحية غير واضح بالفاتورة، تم تقديره تلقائياً (+ سنتين)');
-      } else {
+      let expiryDate = '';
+      if (item.expiryDate && item.expiryDate !== 'N/A' && item.expiryDate !== 'null') {
+        expiryDate = String(item.expiryDate).trim();
         const exp = new Date(expiryDate);
         const now = new Date();
         const sixMonths = new Date();
         sixMonths.setMonth(now.getMonth() + 6);
 
-        if (exp < now) {
-          discrepancies.push('⚠️ تنبيه: تاريخ الصلاحية منتهي!');
-        } else if (exp < sixMonths) {
-          discrepancies.push('⚠️ تنبيه: الصلاحية قريبة (أقل من 6 أشهر)');
+        if (!isNaN(exp.getTime())) {
+          if (exp < now) {
+            discrepancies.push('⚠️ تنبيه: تاريخ الصلاحية منتهي!');
+          } else if (exp < sixMonths) {
+            discrepancies.push('⚠️ تنبيه: الصلاحية قريبة (أقل من 6 أشهر)');
+          }
         }
       }
 
+      // ZERO GUESSWORK: Do NOT invent batch numbers
+      const batchNumber = item.batchNumber && item.batchNumber !== 'N/A' && item.batchNumber !== 'null'
+        ? String(item.batchNumber).trim()
+        : '';
+
       if (matchResult.confidence === 'LOW') {
-        discrepancies.push('⚠️ دواء غير مسجل بالدليل الموحد - يرجى مراجعة الاسم والجرعة');
+        discrepancies.push('💡 صنف جديد في مخزنك - سيتم إدراجه وتفعيل بيعه');
       } else if (matchResult.confidence === 'MEDIUM') {
-        discrepancies.push(`💡 تم اقتراح المطابقة مع: ${matchResult.tradeName}`);
+        discrepancies.push(`💡 تم مطابقة الصنف مع: ${matchResult.tradeName}`);
       }
 
       if (bonusQuantity > 0) {
-        discrepancies.push(`🎁 يشتمل على بونص مجاني (${bonusQuantity} عبوات هدايا)`);
+        discrepancies.push(`🎁 يشتمل على بونص مجاني (${bonusQuantity} علب هدايا)`);
       }
 
       if (discrepancies.length > 0) {
         discrepanciesCount += discrepancies.length;
       }
 
+      const units = matchResult.medicine?.unitsPerPack || item.unitsPerPack || 1;
+      const unitPrice = sellingPrice > 0 && units > 1 ? Math.round(sellingPrice / units) : sellingPrice;
+
       matchedItems.push({
         rawName,
         matchedMedicineId: matchResult.medicine?.id || null,
-        matchedTradeName: matchResult.tradeName || extractedTradeName,
+        matchedTradeName: cleanName,
         scientificName: matchResult.scientificName || item.scientificName || '',
-        strength: item.strength || matchResult.medicine?.strength || '',
+        strength: cleanStrength || matchResult.medicine?.strength || '',
         dosageForm: item.dosageForm || matchResult.medicine?.dosageForm || '',
         manufacturer: item.manufacturer || matchResult.medicine?.manufacturer || '',
         barcode: matchResult.barcode || item.barcode || '',
-        batchNumber: item.batchNumber ? String(item.batchNumber).trim() : `BN-${Math.floor(1000 + Math.random() * 9000)}`,
+        batchNumber,
         expiryDate,
         quantityPacks,
         bonusQuantity,
-        unitsPerPack: matchResult.medicine?.unitsPerPack || item.unitsPerPack || 1,
+        unitsPerPack: units,
         purchasePricePack: purchasePrice,
+        discountPercent,
         sellingPricePack: sellingPrice,
-        totalCost: quantityPacks * purchasePrice,
+        sellingPriceUnit: unitPrice,
+        shelfLocation: '',
+        totalCost: quantityPacks * (purchasePrice * (1 - discountPercent / 100)),
         confidence: matchResult.confidence,
         discrepancies,
       });
@@ -163,13 +249,34 @@ export class OcrAiService {
 
     const calculatedTotal = matchedItems.reduce((acc, it) => acc + it.totalCost, 0);
 
+    // Parse Tiered Monthly Payment Discounts
+    let discountTiers: DiscountTier[] = [];
+    if (Array.isArray(aiParsedData.discountTiers) && aiParsedData.discountTiers.length > 0) {
+      discountTiers = aiParsedData.discountTiers.map((t: any, idx: number) => ({
+        monthIndex: Number(t.monthIndex) || (idx + 1),
+        daysLimit: Number(t.daysLimit) || ((idx + 1) * 30),
+        discountPercent: Number(t.discountPercent) || 0,
+      }));
+    } else if (aiParsedData.earlyDiscountPercent && Number(aiParsedData.earlyDiscountPercent) > 0) {
+      const days = Number(aiParsedData.earlyDiscountDays) || 30;
+      discountTiers = [
+        {
+          monthIndex: Math.ceil(days / 30) || 1,
+          daysLimit: days,
+          discountPercent: Number(aiParsedData.earlyDiscountPercent),
+        },
+      ];
+    }
+
     return {
       invoiceNumber: aiParsedData.invoiceNumber ? String(aiParsedData.invoiceNumber) : `INV-${Date.now().toString().slice(-6)}`,
       supplierName: aiParsedData.supplierName ? String(aiParsedData.supplierName) : 'مذخر أدوية',
       invoiceDate: aiParsedData.invoiceDate ? String(aiParsedData.invoiceDate) : new Date().toISOString().slice(0, 10),
       totalAmount: Number(aiParsedData.totalAmount) || calculatedTotal,
-      earlyDiscountDays: aiParsedData.earlyDiscountDays ? Number(aiParsedData.earlyDiscountDays) : null,
-      earlyDiscountPercent: aiParsedData.earlyDiscountPercent ? Number(aiParsedData.earlyDiscountPercent) : null,
+      earlyDiscountDays: discountTiers.length > 0 ? discountTiers[0].daysLimit : null,
+      earlyDiscountPercent: discountTiers.length > 0 ? discountTiers[0].discountPercent : null,
+      discountMonths: discountTiers.length > 0 ? discountTiers.length : null,
+      discountTiers,
       confidenceScore: Math.max(70, 100 - discrepanciesCount * 4),
       items: matchedItems,
       discrepanciesCount,
@@ -280,17 +387,30 @@ export class OcrAiService {
       You are an expert pharmaceutical accountant and OCR scanner specializing in Iraqi pharmacy supplier invoices (فواتير مذاخر الأدوية العراقية).
       Analyze the provided image of a wholesale pharmaceutical invoice and accurately extract structured medicine items in JSON format.
 
-      CRITICAL NAME PARSING RULES:
-      1. "tradeName": MUST consist of (Clean Commercial Name + Strength/Dosage) ONLY. Example: "Amaryl 4mg", "Atacand Tab 8mg", "Atacand Plus 16/12.5mg", "Concor Cor 2.5mg", "Pregaline 75mg", "Suraxim 400mg", "Rabital H 300/12.5mg".
-      2. Do NOT include form words (Tab, Cap, Drop, Inj) or pack sizes (*30, *28, *6) or manufacturer names (Sanofi, Merck, Accord, AstraZeneca) or bonus text in tradeName, UNLESS the form/strength is part of the dosage definition (e.g. Amaryl 4mg).
-      3. "strength": Extract dosage strength into its own separate column e.g. "4mg", "8mg", "16/12.5mg", "2.5mg", "75mg", "400mg", "300/12.5mg", "100mg/1ml".
-      4. "dosageForm": Extract dosage form into its own separate column e.g. "Tab", "Cap", "Oral Drops", "Inj", "Eye Drops".
-      5. "unitsPerPack": Extract number of pills/strips/ml inside each box into its own column e.g. 30 for *30, 28 for *28, 6 for *6, 15 for 15ml.
-      6. "manufacturer": Extract manufacturer and country into its own column e.g. "Sanofi aventis - Germany", "AstraZeneca - Sweden", "Merck - Germany", "United - Jordan".
-      7. "quantityPacks": Extract main purchased paid box quantity (e.g. 10, 5, 4, 3).
-      8. "bonusQuantity": Extract free bonus boxes given (الهدية) e.g. 2 for "10-5free" with 5 quantity, 5 for "10-10free" with 5 quantity, otherwise 0.
-      11. "earlyDiscountDays": Extract early payment discount days threshold from notes at bottom of invoice if printed (e.g. 60 if invoice states "خلال شهرين" or 30 if "خلال شهر", otherwise null).
-      12. "earlyDiscountPercent": Extract early payment discount percentage from notes at bottom if printed (e.g. 3 if "خصم 3%" or 2 if "خصم 2%", otherwise null).
+      STRICT DRUG NAME FORMATTING RULE:
+      1. "tradeName": MUST consist of (Clean Commercial Trade Name + Strength) ONLY.
+         Example: "Panadol 500mg", "Augmentin 1g", "Cataflam 50mg", "Amaryl 4mg", "Ventolin 2mg", "Lipitor 20mg", "Pregaline 75mg".
+         ABSOLUTELY FORBIDDEN IN "tradeName":
+         - NEVER include dosage forms (Tab, Tablet, Cap, Capsule, Syrup, Syr, Susp, Suspension, Inj, Injection, Amp, Vial, Drops, Cream, Oint, Gel, Supp, Spray, حبوب, أقراص, كبسول, شراب, معلق).
+         - NEVER include packaging info (*20, *30, *100, باكيت, علبة, شريط, box, pack, piece).
+         - NEVER include manufacturer names (Sanofi, Merck, Accord, AstraZeneca, SDI, Gula, Pfizer, Hikma, Julphar).
+         - NEVER include supplier codes or bonus text.
+
+      ZERO GUESSWORK RULE - EXTRACT ONLY WHAT IS PRINTED:
+      2. If expiryDate is NOT clearly printed on the invoice, return null. DO NOT GUESS OR ESTIMATE A DATE (+2 years).
+      3. If batchNumber is NOT printed, return null. DO NOT INVENT A BATCH NUMBER.
+      4. If barcode is NOT printed, return null.
+      5. If sellingPricePack is NOT printed, return null.
+      6. Only extract what is visibly legible on the invoice image.
+
+      TIERED PAYMENT DISCOUNT EXTRACTION:
+      7. Check notes or footer for early payment terms (e.g. "سداد شهر 6%، شهرين 3%، 3 أشهر بدون خصم"):
+         Extract into "discountTiers" array:
+         [
+           { "monthIndex": 1, "daysLimit": 30, "discountPercent": 6 },
+           { "monthIndex": 2, "daysLimit": 60, "discountPercent": 3 }
+         ]
+         If no payment discount is mentioned, return empty array [].
 
       Required Output JSON Format:
       {
@@ -298,24 +418,25 @@ export class OcrAiService {
         "supplierName": "string",
         "invoiceDate": "YYYY-MM-DD",
         "totalAmount": number,
-        "earlyDiscountDays": number or null,
-        "earlyDiscountPercent": number or null,
+        "discountTiers": [
+          { "monthIndex": 1, "daysLimit": 30, "discountPercent": 6 }
+        ],
         "items": [
           {
-            "rawName": "string (full raw text line)",
-            "tradeName": "string (Clean Commercial Name + Strength e.g. Amaryl 4mg)",
-            "strength": "string (e.g. 4mg)",
+            "rawName": "string (original raw text line)",
+            "tradeName": "string (Trade Name + Strength ONLY e.g. Panadol 500mg)",
+            "strength": "string (e.g. 500mg)",
             "dosageForm": "string (e.g. Tab)",
             "unitsPerPack": number,
-            "manufacturer": "string",
             "quantityPacks": number,
             "bonusQuantity": number,
             "purchasePricePack": number,
-            "sellingPricePack": number,
+            "discountPercent": number,
+            "sellingPricePack": number or null,
             "scientificName": "string",
-            "barcode": "string",
-            "batchNumber": "string",
-            "expiryDate": "YYYY-MM-DD"
+            "barcode": "string or null",
+            "batchNumber": "string or null",
+            "expiryDate": "YYYY-MM-DD or null"
           }
         ]
       }
@@ -323,8 +444,8 @@ export class OcrAiService {
       Important: Return ONLY valid JSON format. Do NOT wrap in markdown or explanations.
     `;
 
-    // Try gemini-2.5-flash, fallback to gemini-1.5-flash
-    const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
+    // Use official active Google Gemini Vision models (starting with fast gemini-1.5-flash)
+    const models = ['gemini-1.5-flash', 'gemini-2.0-flash-exp', 'gemini-1.5-pro'];
     let lastError = null;
 
     for (const model of models) {
