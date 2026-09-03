@@ -71,11 +71,11 @@ function cleanTradeNameWithStrength(rawName: string, strengthProvided?: string):
 
   // Strip dosage forms strictly
   const formPatterns = [
-    /\b(?:tabs?|tablets?|taps?|أقراص|حبوب)\b/gi,
+    /\b(?:tabs?|tablets?|taps?|compresse?s?|comprim[eé]s?|أقراص|حبوب)\b/gi,
     /\b(?:caps?|capsules?|كبسول)\b/gi,
     /\b(?:syrups?|syr|شراب)\b/gi,
     /\b(?:susp(?:ension)?|معلق)\b/gi,
-    /\b(?:inj(?:ection)?|amp(?:oule)?|vial|حقن|امبول|فيال)\b/gi,
+    /\b(?:inj(?:ection)?|amp(?:oule)?s?|vials?|حقن|امبول|فيال)\b/gi,
     /\b(?:drops?|eye drops?|ear drops?|قطرة|قطرات)\b/gi,
     /\b(?:creams?|cr|كريم)\b/gi,
     /\b(?:ointments?|oint|مرهم)\b/gi,
@@ -93,9 +93,10 @@ function cleanTradeNameWithStrength(rawName: string, strengthProvided?: string):
   }
 
   // Strip pack/bonus/packaging noise & common pharmaceutical companies
-  base = base.replace(/\b\d+\s*(?:tab|cap|amp|vial|ml|s)\b/gi, ' ');
-  base = base.replace(/\b(?:باكيت|شريط|علبة|قطعة|box|strip|pack|free|bonus|هدية)\b/gi, ' ');
-  base = base.replace(/\b(?:sanofi|merck|accord|astrazeneca|novartis|pfizer|gula|sdi|hikma|julphar|dar al dawa|awamedica|acino|glaxo|gsk)\b/gi, ' ');
+  base = base.replace(/\b\d+\s*(?:tabs?|caps?|amp(?:oule)?s?|vials?|ml|s)\b/gi, ' ');
+  base = base.replace(/\b\d+(?:tabs?|caps?|amp(?:oule)?s?|vials?|ml)\b/gi, ' ');
+  base = base.replace(/\b(?:باكيت|شريط|علبة|قطعة|box|strip|pack|free|bonus|هدية|orginal|original)\b/gi, ' ');
+  base = base.replace(/\b(?:sanofi|merck|accord|astrazeneca|novartis|pfizer|gula|sdi|hikma|julphar|dar al dawa|awamedica|acino|glaxo|gsk|bayer|roche)\b/gi, ' ');
   base = base.replace(/[\(\)\[\]\-\+\:\;]+/g, ' ');
   base = base.replace(/\s+/g, ' ').trim();
 
@@ -222,10 +223,14 @@ export class OcrAiService {
       const units = matchResult.medicine?.unitsPerPack || item.unitsPerPack || 1;
       const unitPrice = sellingPrice > 0 && units > 1 ? Math.round(sellingPrice / units) : sellingPrice;
 
+      const cleanMatchedName = matchResult.medicine?.tradeName
+        ? cleanTradeNameWithStrength(matchResult.medicine.tradeName, cleanStrength).cleanName
+        : cleanName;
+
       matchedItems.push({
         rawName,
         matchedMedicineId: matchResult.medicine?.id || null,
-        matchedTradeName: cleanName,
+        matchedTradeName: cleanMatchedName || cleanName,
         scientificName: matchResult.scientificName || item.scientificName || '',
         strength: cleanStrength || matchResult.medicine?.strength || '',
         dosageForm: item.dosageForm || matchResult.medicine?.dosageForm || '',
