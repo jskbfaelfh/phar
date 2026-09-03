@@ -19,7 +19,9 @@ export class AuthService {
   ) {}
 
   async login(loginDto: LoginDto) {
-    const { pharmacySlug, username, password } = loginDto;
+    const pharmacySlug = loginDto.pharmacySlug?.trim();
+    const username = loginDto.username?.trim();
+    const password = loginDto.password;
 
     // 1. Check Tenant in Master DB
     const tenant = await this.prisma.tenant.findUnique({
@@ -36,7 +38,7 @@ export class AuthService {
 
     // 2. Fetch User inside Tenant Schema
     const users: any[] = await this.prisma.$queryRawUnsafe(
-      `SELECT id, name, username, password_hash, role, is_active FROM "${tenant.schemaName}".users WHERE username = $1 LIMIT 1`,
+      `SELECT id, name, username, password_hash, role, is_active FROM "${tenant.schemaName}".users WHERE LOWER(TRIM(username)) = LOWER($1) LIMIT 1`,
       username,
     );
 

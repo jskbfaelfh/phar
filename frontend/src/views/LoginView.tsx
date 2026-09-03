@@ -36,7 +36,11 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, onNavigate
     try {
       const data = await apiRequest<any>('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ pharmacySlug, username, password }),
+        body: JSON.stringify({
+          pharmacySlug: pharmacySlug.trim(),
+          username: username.trim(),
+          password,
+        }),
       });
 
       setAuthToken(data.accessToken);

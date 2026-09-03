@@ -41,13 +41,16 @@ export class ProvisioningService {
     const passwordHash = await bcrypt.hash(dto.ownerPassword, saltRounds);
     const ownerUserId = crypto.randomUUID();
 
+    const cleanOwnerUsername = (dto.ownerUsername || 'user').toLowerCase().trim().replace(/\s+/g, '_');
+    const cleanOwnerName = (dto.ownerName || 'مدير الصيدلية').trim();
+
     // 3. Insert Owner user record in the newly created tenant schema
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO "${schemaName}".users (id, name, username, password_hash, role, is_active, created_at)
        VALUES ($1::uuid, $2, $3, $4, 'OWNER', TRUE, NOW())`,
       ownerUserId,
-      dto.ownerName,
-      dto.ownerUsername,
+      cleanOwnerName,
+      cleanOwnerUsername,
       passwordHash,
     );
 
@@ -57,7 +60,7 @@ export class ProvisioningService {
 
     for (let i = 1; i <= count; i++) {
       const suffix = count === 1 ? '_pos' : `_pos${i}`;
-      const cashierUsername = `${dto.ownerUsername}${suffix}`;
+      const cashierUsername = `${cleanOwnerUsername}${suffix}`;
       const cashierPassword = dto.cashierPassword || '123456';
       const cashierHash = await bcrypt.hash(cashierPassword, saltRounds);
       const cashierUserId = crypto.randomUUID();

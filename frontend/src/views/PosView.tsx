@@ -380,7 +380,35 @@ export const PosView: React.FC = () => {
       if (navigator.onLine) {
         try {
           const data = await apiRequest<SearchMedicine[]>(`/inventory?search=${encodeURIComponent(searchTerm)}`);
-          setSearchResults(data);
+          if (Array.isArray(data) && data.length > 0) {
+            setSearchResults(data);
+            return;
+          }
+
+          // If not in local pharmacy inventory, search the 28,500 Master Catalog!
+          const catData = await apiRequest<any[]>(`/medicines/search?q=${encodeURIComponent(searchTerm)}`);
+          if (Array.isArray(catData) && catData.length > 0) {
+            const mapped: SearchMedicine[] = catData.map((c) => ({
+              id: c.id,
+              medicineId: c.id,
+              tradeName: c.tradeName,
+              scientificName: c.scientificName,
+              dosageForm: c.dosageForm,
+              strength: c.strength,
+              barcode: c.barcode,
+              unitsPerPack: c.defaultUnitsPerPack || 1,
+              sellingPricePack: 0,
+              sellingPriceUnit: 0,
+              availablePacks: 0,
+              availableStrips: 0,
+              totalUnitsRemaining: 0,
+              activeBatches: [],
+            }));
+            setSearchResults(mapped);
+            return;
+          }
+
+          setSearchResults([]);
           return;
         } catch (err) {
           console.warn('Online search failed, falling back to local IndexedDB', err);
@@ -400,6 +428,24 @@ export const PosView: React.FC = () => {
   }, [searchTerm]);
 
   const addToCart = (med: SearchMedicine, unitType: 'PACK' | 'STRIP', specificBatch?: ActiveBatchInfo) => {
+    let packPrice = Number(med.sellingPricePack) || 0;
+    let unitPrice = Number(med.sellingPriceUnit) || 0;
+
+    // If medicine from Master Catalog has no price set yet, prompt cashier
+    if (packPrice === 0 && unitPrice === 0) {
+      const input = window.prompt(
+        `الدواء (${med.tradeName}) من الدليل المركزي غير مسعر في مخزنك بعد.\nأدخل سعر البيع بالدينار العراقي:`,
+        '5000',
+      );
+      if (!input || isNaN(Number(input)) || Number(input) <= 0) {
+        return;
+      }
+      packPrice = Number(input);
+      unitPrice = med.unitsPerPack > 1 ? Math.round(packPrice / med.unitsPerPack) : packPrice;
+      med.sellingPricePack = packPrice;
+      med.sellingPriceUnit = unitPrice;
+    }
+
     const batchId = specificBatch?.id;
     const batchNumber = specificBatch?.batchNumber;
 
@@ -434,8 +480,8 @@ export const PosView: React.FC = () => {
 
       const { totalPrice, effectiveUnitPrice, breakdown } = calculateDynamicItemTotals(
         med.activeBatches,
-        Number(med.sellingPricePack),
-        Number(med.sellingPriceUnit),
+        packPrice,
+        unitPrice,
         med.unitsPerPack,
         1,
         unitType,

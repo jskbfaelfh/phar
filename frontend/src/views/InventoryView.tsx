@@ -59,6 +59,22 @@ export const InventoryView: React.FC = () => {
   const [smartSearchAutoVoice, setSmartSearchAutoVoice] = useState(false);
   const [showAddMedModal, setShowAddMedModal] = useState(false);
 
+  // Master Catalog Search Integration (28,500 Medicines)
+  const [catalogResults, setCatalogResults] = useState<any[]>([]);
+  const [quickAddMed, setQuickAddMed] = useState<any | null>(null);
+  const [savingQuickAdd, setSavingQuickAdd] = useState(false);
+  const [quickAddForm, setQuickAddForm] = useState({
+    sellingPricePack: 0,
+    sellingPriceUnit: 0,
+    purchasePricePack: 0,
+    quantityPacks: 10,
+    unitsPerPack: 1,
+    shelfLocation: '',
+    batchNumber: 'BATCH-01',
+    expiryMonth: 12,
+    expiryYear: new Date().getFullYear() + 2,
+  });
+
   // Edit price & unit settings modal state
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const [shelfFilter, setShelfFilter] = useState('');
@@ -140,6 +156,18 @@ export const InventoryView: React.FC = () => {
             setLowStockCount(low);
             saveLocalInventoryBulk(serverItems).catch(console.error);
           }
+
+          // If no local items match, automatically search the 28,500 Master Catalog by barcode or name
+          if (serverItems.length === 0 && searchTerm.trim().length >= 2) {
+            try {
+              const catMeds = await apiRequest<any[]>(`/medicines/search?q=${encodeURIComponent(searchTerm.trim())}`);
+              setCatalogResults(catMeds || []);
+            } catch {
+              setCatalogResults([]);
+            }
+          } else {
+            setCatalogResults([]);
+          }
         }
       }
     } catch (err: any) {
@@ -202,6 +230,62 @@ export const InventoryView: React.FC = () => {
     fetchSummaryCounts();
     fetchSmartExpiry();
   });
+
+  const handleOpenQuickAdd = (med: any) => {
+    setQuickAddMed(med);
+    const units = Number(med.defaultUnitsPerPack) || 1;
+    setQuickAddForm({
+      sellingPricePack: 0,
+      sellingPriceUnit: 0,
+      purchasePricePack: 0,
+      quantityPacks: 10,
+      unitsPerPack: units,
+      shelfLocation: '',
+      batchNumber: 'BATCH-01',
+      expiryMonth: 12,
+      expiryYear: new Date().getFullYear() + 2,
+    });
+  };
+
+  const handleQuickAddSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickAddMed) return;
+    setSavingQuickAdd(true);
+    try {
+      await apiRequest('/inventory/bulk-entry', {
+        method: 'POST',
+        body: JSON.stringify({
+          items: [
+            {
+              medicineId: quickAddMed.id,
+              customName: quickAddMed.tradeName,
+              unitsPerPack: Number(quickAddForm.unitsPerPack) || 1,
+              quantityPacks: Number(quickAddForm.quantityPacks) || 1,
+              sellingPricePack: Number(quickAddForm.sellingPricePack) || 0,
+              sellingPriceUnit: Number(quickAddForm.sellingPriceUnit) || 0,
+              purchasePricePack: Number(quickAddForm.purchasePricePack) || 0,
+              expiryMonth: Number(quickAddForm.expiryMonth) || 12,
+              expiryYear: Number(quickAddForm.expiryYear) || (new Date().getFullYear() + 2),
+              batchNumber: quickAddForm.batchNumber?.trim() || 'BATCH-01',
+            },
+          ],
+        }),
+      });
+      setMessage({
+        type: 'success',
+        text: `تمت إضافة (${quickAddMed.tradeName}) إلى مخزنك وتسعيره بنجاح! 📦✨`,
+      });
+      setQuickAddMed(null);
+      setCatalogResults([]);
+      setSearchTerm('');
+      await fetchInventory();
+      await fetchSummaryCounts();
+    } catch (err: any) {
+      alert(err.message || 'فشل حفظ الدواء في المخزن');
+    } finally {
+      setSavingQuickAdd(false);
+    }
+  };
 
   const openEditModal = (item: any) => {
     setEditingItem(item);
@@ -520,6 +604,81 @@ export const InventoryView: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Master Catalog Search Results (28,500 Medicines) */}
+          {catalogResults.length > 0 && (
+            <div className="bg-gradient-to-r from-indigo-50 via-purple-50 to-blue-50 border-2 border-indigo-300 rounded-3xl p-5 shadow-sm animate-fadeIn">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-3 border-b border-indigo-200">
+                <div className="flex items-center gap-2.5">
+                  <span className="p-2 bg-indigo-600 text-white rounded-xl shadow-xs">
+                    <Sparkles className="w-5 h-5" />
+                  </span>
+                  <div>
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base flex items-center gap-2">
+                      تم العثور في الدليل المركزي العام ({catalogResults.length} مادة)
+                    </h4>
+                    <p className="text-xs text-indigo-700 font-medium">
+                      هذا الدواء مسجل في الدليل الموحد وغير مضاف لمخزن صيدليتك بعد. اضغط "إضافة لمخزني" لتسعيره وإدخاله فوراً!
+                    </p>
+                  </div>
+                </div>
+                <span className="self-start sm:self-auto text-xs font-mono font-black text-indigo-700 bg-white border border-indigo-200 px-3 py-1.5 rounded-xl shadow-2xs">
+                  كود البحث: {searchTerm}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 max-h-96 overflow-y-auto pr-1">
+                {catalogResults.map((med) => (
+                  <div
+                    key={med.id}
+                    className="bg-white p-4 rounded-2xl border border-indigo-100 shadow-xs flex flex-col justify-between gap-3 hover:border-indigo-400 hover:shadow-md transition-all group"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <h5 className="font-black text-slate-900 text-sm group-hover:text-indigo-600 transition-colors">
+                          {med.tradeName}
+                        </h5>
+                        <span className="text-[11px] font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md shrink-0">
+                          {med.dosageForm || 'عام'}
+                        </span>
+                      </div>
+
+                      <div className="text-xs text-slate-500 mb-2">
+                        المادة الفعالة: <b className="text-slate-800 font-bold">{med.scientificName || med.tradeName}</b>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                        {med.barcode ? (
+                          <span className="font-mono bg-indigo-50 text-indigo-800 font-black px-2 py-0.5 rounded-md border border-indigo-200">
+                            🏷️ {med.barcode}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 bg-slate-50 px-2 py-0.5 rounded-md">بدون باركود</span>
+                        )}
+                        {med.strength && (
+                          <span className="font-mono bg-emerald-50 text-emerald-800 font-bold px-2 py-0.5 rounded-md border border-emerald-200">
+                            العيار: {med.strength}
+                          </span>
+                        )}
+                        <span className="text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md font-bold">
+                          التعبئة: {med.defaultUnitsPerPack || 1} شريط/علبة
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleOpenQuickAdd(med)}
+                      className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all active:scale-95 shadow-xs cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>+ إضافة إلى مخزني وتسعيره</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Inventory Table */}
           <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
@@ -1368,6 +1527,199 @@ export const InventoryView: React.FC = () => {
             fetchSummaryCounts();
           }}
         />
+      )}
+
+      {/* 8. Quick Add & Price Medicine From Master Catalog Modal */}
+      {quickAddMed && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-lg shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between pb-4 border-b border-slate-100 mb-4">
+              <div>
+                <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg">
+                  من الدليل المركزي الموحد (28 ألف مادة) 💊
+                </span>
+                <h3 className="font-black text-lg text-slate-900 mt-1.5">{quickAddMed.tradeName}</h3>
+                <p className="text-xs text-slate-500 font-medium">
+                  {quickAddMed.scientificName || quickAddMed.tradeName} {quickAddMed.strength && `• ${quickAddMed.strength}`}
+                </p>
+                {quickAddMed.barcode && (
+                  <span className="font-mono text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md inline-block mt-1">
+                    الباركود: {quickAddMed.barcode}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuickAddMed(null)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleQuickAddSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    سعر البيع للباكيت (د.ع) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="250"
+                    required
+                    value={quickAddForm.sellingPricePack || ''}
+                    onChange={(e) => {
+                      const packPrice = Number(e.target.value) || 0;
+                      const units = Number(quickAddForm.unitsPerPack) || 1;
+                      setQuickAddForm((prev) => ({
+                        ...prev,
+                        sellingPricePack: packPrice,
+                        sellingPriceUnit: units > 1 ? Math.round(packPrice / units) : packPrice,
+                      }));
+                    }}
+                    placeholder="مثال: 5000"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر البيع للشريط/الوحدة (د.ع)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="50"
+                    value={quickAddForm.sellingPriceUnit || ''}
+                    onChange={(e) =>
+                      setQuickAddForm((prev) => ({ ...prev, sellingPriceUnit: Number(e.target.value) || 0 }))
+                    }
+                    placeholder="مثال: 2500"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    رصيد الباكيتات الحالي <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={quickAddForm.quantityPacks || ''}
+                    onChange={(e) =>
+                      setQuickAddForm((prev) => ({ ...prev, quantityPacks: Number(e.target.value) || 0 }))
+                    }
+                    placeholder="مثال: 10"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">عدد الأشرطة/الوحدات في الباكيت</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={quickAddForm.unitsPerPack || 1}
+                    onChange={(e) => {
+                      const units = Number(e.target.value) || 1;
+                      const packPrice = Number(quickAddForm.sellingPricePack) || 0;
+                      setQuickAddForm((prev) => ({
+                        ...prev,
+                        unitsPerPack: units,
+                        sellingPriceUnit: units > 1 ? Math.round(packPrice / units) : packPrice,
+                      }));
+                    }}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر الشراء للباكيت (اختياري)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="250"
+                    value={quickAddForm.purchasePricePack || ''}
+                    onChange={(e) =>
+                      setQuickAddForm((prev) => ({ ...prev, purchasePricePack: Number(e.target.value) || 0 }))
+                    }
+                    placeholder="مثال: 3500"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">موقع الرف (Shelf)</label>
+                  <input
+                    type="text"
+                    value={quickAddForm.shelfLocation}
+                    onChange={(e) => setQuickAddForm((prev) => ({ ...prev, shelfLocation: e.target.value }))}
+                    placeholder="مثال: A-04"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">شهر الصلاحية (MM)</label>
+                  <select
+                    value={quickAddForm.expiryMonth}
+                    onChange={(e) =>
+                      setQuickAddForm((prev) => ({ ...prev, expiryMonth: Number(e.target.value) || 12 }))
+                    }
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                      <option key={m} value={m}>
+                        {m < 10 ? `0${m}` : m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">سنة الصلاحية (YYYY)</label>
+                  <input
+                    type="number"
+                    min={new Date().getFullYear()}
+                    max={new Date().getFullYear() + 10}
+                    value={quickAddForm.expiryYear}
+                    onChange={(e) =>
+                      setQuickAddForm((prev) => ({
+                        ...prev,
+                        expiryYear: Number(e.target.value) || new Date().getFullYear() + 2,
+                      }))
+                    }
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setQuickAddMed(null)}
+                  className="px-4 py-2 text-slate-500 hover:text-slate-800 text-xs font-bold cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingQuickAdd}
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-md shadow-indigo-200 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {savingQuickAdd ? 'جاري الحفظ...' : 'حفظ وإدخال للمخزن 🚀'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );
