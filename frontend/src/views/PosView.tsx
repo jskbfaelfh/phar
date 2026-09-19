@@ -31,11 +31,13 @@ import {
   UserCheck,
   ChevronDown,
   ChevronUp,
+  Camera,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250, calculateStripPrice } from '../utils/currency';
 import { usePharmacyLiveSync } from '../hooks/usePharmacyLiveSync';
 import { SmartSearchModal } from '../components/SmartSearchModal';
+import { CameraBarcodeScannerModal } from '../components/CameraBarcodeScannerModal';
 import {
   cacheInventoryLocally,
   searchLocalInventory,
@@ -287,6 +289,7 @@ export const PosView: React.FC = () => {
   // Customer Name & Sales Ledger History State
   const [customerName, setCustomerName] = useState('');
   const [showSalesHistoryModal, setShowSalesHistoryModal] = useState(false);
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
   const [salesHistory, setSalesHistory] = useState<any[]>([]);
   const [loadingSalesHistory, setLoadingSalesHistory] = useState(false);
   const [salesHistorySearch, setSalesHistorySearch] = useState('');
@@ -1161,6 +1164,17 @@ export const PosView: React.FC = () => {
                 className="w-full pr-12 pl-4 py-3 sm:py-3.5 bg-white border-2 border-slate-200 rounded-2xl text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm sm:text-base font-black shadow-xs transition-all"
               />
             </div>
+
+            {/* Camera Barcode Scanner Button */}
+            <button
+              type="button"
+              onClick={() => setShowCameraScanner(true)}
+              className="h-12 sm:h-13 px-4 sm:px-5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-2 border-emerald-300 rounded-2xl transition-all cursor-pointer shadow-2xs active:scale-95 flex items-center gap-2 text-xs sm:text-sm font-black shrink-0"
+              title="مسح الباركود بكاميرا الجهاز (Webcam Scanner)"
+            >
+              <Camera className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
+              <span className="hidden sm:inline">كاميرا 📷</span>
+            </button>
 
             {/* Voice Search Button */}
             <button
@@ -3025,6 +3039,16 @@ export const PosView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Camera Barcode Scanner Modal */}
+      <CameraBarcodeScannerModal
+        isOpen={showCameraScanner}
+        onClose={() => setShowCameraScanner(false)}
+        onScan={(scannedBarcode) => {
+          setSearchTerm(scannedBarcode);
+        }}
+        title="مسح باركود الدواء بكاميرا الكاشير"
+      />
     </>
   );
 };

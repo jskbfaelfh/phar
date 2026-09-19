@@ -18,11 +18,13 @@ import {
   ArrowDownLeft,
   Tag,
   BadgePercent,
+  Camera,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250, calculateStripPrice } from '../utils/currency';
 import { SmartExpiryInput } from '../components/SmartExpiryInput';
 import { PriceChangesReviewModal, type ChangedPriceItem } from '../components/PriceChangesReviewModal';
+import { CameraBarcodeScannerModal } from '../components/CameraBarcodeScannerModal';
 
 interface TableRowItem {
   tempId: string;
@@ -80,6 +82,7 @@ export const BulkStockEntryView: React.FC = () => {
   // Search & Table
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
   const [items, setItems] = useState<TableRowItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -787,6 +790,16 @@ export const BulkStockEntryView: React.FC = () => {
               placeholder="امسح الباركود أو اكتب اسم الدواء ثم اضغط Enter..."
               className="w-full pr-11 pl-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-bold text-sm focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
             />
+            {/* Camera Barcode Scanner */}
+            <button
+              type="button"
+              onClick={() => setShowCameraScanner(true)}
+              className="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-black flex items-center gap-1.5 shrink-0 shadow-2xs transition-all active:scale-95 cursor-pointer"
+              title="مسح الباركود بكاميرا الجهاز (Webcam Scanner)"
+            >
+              <Camera className="w-4 h-4 text-emerald-600" />
+              <span>كاميرا 📷</span>
+            </button>
           </div>
 
           <button
@@ -1477,6 +1490,16 @@ export const BulkStockEntryView: React.FC = () => {
         }}
         onCancel={() => setShowPriceChangesModal(false)}
         isSubmitting={loading}
+      />
+
+      {/* Camera Barcode Scanner Modal */}
+      <CameraBarcodeScannerModal
+        isOpen={showCameraScanner}
+        onClose={() => setShowCameraScanner(false)}
+        onScan={(scannedBarcode) => {
+          handleSearch(scannedBarcode);
+        }}
+        title="مسح باركود الدواء لكشوفات الشحنة بكاميرا الجهاز"
       />
     </div>
   );

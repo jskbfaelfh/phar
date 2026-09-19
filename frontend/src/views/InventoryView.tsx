@@ -16,6 +16,7 @@ import {
   Sparkles,
   MapPin,
   Plus,
+  Camera,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250, calculateStripPrice } from '../utils/currency';
@@ -26,6 +27,7 @@ import { SupplierReturnModal } from '../components/SupplierReturnModal';
 import { SmartSearchModal } from '../components/SmartSearchModal';
 import { AddUnregisteredMedicineModal } from '../components/AddUnregisteredMedicineModal';
 import { SmartExpiryInput } from '../components/SmartExpiryInput';
+import { CameraBarcodeScannerModal } from '../components/CameraBarcodeScannerModal';
 import {
   getLocalInventory,
   saveLocalInventoryBulk,
@@ -63,6 +65,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
   const [showSmartSearch, setShowSmartSearch] = useState(false);
   const [smartSearchAutoVoice, setSmartSearchAutoVoice] = useState(false);
   const [showAddMedModal, setShowAddMedModal] = useState(false);
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
 
   // Master Catalog Search Integration (28,500 Medicines)
   const [catalogResults, setCatalogResults] = useState<any[]>([]);
@@ -514,6 +517,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                   className="w-full pl-3 pr-9 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 placeholder-slate-400 focus:border-indigo-600 focus:bg-white focus:outline-hidden"
                 />
               </div>
+
+              {/* Camera Barcode Scanner */}
+              <button
+                type="button"
+                onClick={() => setShowCameraScanner(true)}
+                className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-black flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 shadow-2xs"
+                title="مسح الباركود بكاميرا الجهاز (Webcam Scanner)"
+              >
+                <Camera className="w-4 h-4 text-emerald-600" />
+                <span className="hidden sm:inline">كاميرا 📷</span>
+              </button>
 
               {/* Voice Search */}
               <button
@@ -1418,6 +1432,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
           </div>
         </div>
       )}
+
+      {/* Camera Barcode Scanner Modal */}
+      <CameraBarcodeScannerModal
+        isOpen={showCameraScanner}
+        onClose={() => setShowCameraScanner(false)}
+        onScan={(scannedBarcode) => {
+          setSearchTerm(scannedBarcode);
+        }}
+        title="مسح باركود الدواء بكاميرا الجهاز"
+      />
     </div>
   );
 };
