@@ -80,6 +80,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
     unitsPerPack: 1,
     shelfLocation: '',
     batchNumber: '',
+    barcode: '',
     expiryMonth: 12,
     expiryYear: new Date().getFullYear() + 2,
   });
@@ -89,6 +90,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
   const [shelfFilter, setShelfFilter] = useState('');
   const [editForm, setEditForm] = useState({
     customName: '',
+    barcode: '',
     sellingPricePack: 0,
     sellingPriceUnit: 0,
     minAlertUnits: 5,
@@ -257,6 +259,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
       batchNumber: '',
       expiryMonth: history?.expiryMonth || 12,
       expiryYear: history?.expiryYear || currentYear + 2,
+      barcode: med.barcode || history?.barcode || '',
     });
   };
 
@@ -272,6 +275,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
             {
               medicineId: quickAddMed.id,
               customName: quickAddMed.tradeName,
+              barcode: quickAddForm.barcode?.trim() || undefined,
               unitsPerPack: Number(quickAddForm.unitsPerPack) || 1,
               quantityPacks: Number(quickAddForm.quantityPacks) || 1,
               sellingPricePack: Number(quickAddForm.sellingPricePack) || 0,
@@ -305,6 +309,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
     setEditingItem(item);
     setEditForm({
       customName: item.customName || '',
+      barcode: item.barcode || '',
       sellingPricePack: Number(item.sellingPricePack || 0),
       sellingPriceUnit: Number(item.sellingPriceUnit || 0),
       minAlertUnits: Number(item.minAlertUnits || 5),
@@ -321,6 +326,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
         method: 'PATCH',
         body: JSON.stringify({
           customName: editForm.customName || undefined,
+          barcode: editForm.barcode?.trim() || undefined,
           sellingPricePack: Number(editForm.sellingPricePack),
           sellingPriceUnit: Number(editForm.sellingPriceUnit),
           minAlertUnits: Number(editForm.minAlertUnits),
@@ -973,6 +979,27 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>رمز الباركود (Barcode):</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowCameraScanner(true)}
+                    className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200 cursor-pointer"
+                  >
+                    <Camera className="w-3 h-3 text-indigo-600" />
+                    <span>مسح بالكاميرا 📷</span>
+                  </button>
+                </label>
+                <input
+                  type="text"
+                  value={editForm.barcode}
+                  onChange={(e) => setEditForm({ ...editForm, barcode: e.target.value })}
+                  placeholder="امسح أو اكتب الباركود..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">سعر بيع الباكيت:</label>
@@ -1438,7 +1465,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
         isOpen={showCameraScanner}
         onClose={() => setShowCameraScanner(false)}
         onScan={(scannedBarcode) => {
-          setSearchTerm(scannedBarcode);
+          if (editingItem) {
+            setEditForm((prev) => ({ ...prev, barcode: scannedBarcode }));
+          } else if (quickAddMed) {
+            setQuickAddForm((prev) => ({ ...prev, barcode: scannedBarcode }));
+          } else {
+            setSearchTerm(scannedBarcode);
+          }
         }}
         title="مسح باركود الدواء بكاميرا الجهاز"
       />

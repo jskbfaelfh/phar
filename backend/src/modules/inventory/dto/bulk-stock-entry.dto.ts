@@ -103,6 +103,10 @@ export class BulkStockItemDto {
 
   @IsString()
   @IsOptional()
+  barcode?: string;
+
+  @IsString()
+  @IsOptional()
   shelfLocation?: string;
 }
 
@@ -164,6 +168,10 @@ export class UpdateItemPriceDto {
   @IsString()
   @IsOptional()
   customName?: string;
+
+  @IsString()
+  @IsOptional()
+  barcode?: string;
 
   @IsNumber()
   @Min(250, { message: 'أقل سعر بيع للعلبة هو 250 د.ع' })

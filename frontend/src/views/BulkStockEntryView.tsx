@@ -411,6 +411,7 @@ export const BulkStockEntryView: React.FC = () => {
         items: items.map((i) => ({
           medicineId: i.medicineId,
           customName: i.customName || undefined,
+          barcode: i.barcode?.trim() || undefined,
           newMedicineData: i.isNewMedicine
             ? {
                 tradeName: i.tradeName,
@@ -910,6 +911,7 @@ export const BulkStockEntryView: React.FC = () => {
               <tr>
                 <th className="p-2.5 w-10 text-center">#</th>
                 <th className="p-2.5 min-w-[180px]">الدواء</th>
+                <th className="p-2.5 min-w-[130px]">الباركود</th>
                 <th className="p-2.5 w-20 text-center">الكمية</th>
                 <th className="p-2.5 w-20 text-center bg-amber-50/70 text-amber-900">
                   <span className="flex items-center justify-center gap-1">
@@ -985,6 +987,18 @@ export const BulkStockEntryView: React.FC = () => {
                             className="w-full px-2 py-1 bg-amber-50/50 border border-amber-200 rounded-md text-[10px] text-amber-950 font-bold placeholder:text-amber-600/60"
                           />
                         </div>
+                      </td>
+
+                      {/* Barcode Input */}
+                      <td className="p-2">
+                        <input
+                          type="text"
+                          value={row.barcode || ''}
+                          onChange={(e) => updateRowField(row.tempId, 'barcode', e.target.value)}
+                          onKeyDown={(e) => handleKeyDown(e, `input-qty-${idx}`)}
+                          placeholder="امسح أو اكتب..."
+                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-300 rounded-md font-mono text-xs text-slate-800 focus:bg-white focus:border-indigo-500"
+                        />
                       </td>
 
                       {/* Quantity Packs */}
@@ -1320,6 +1334,28 @@ export const BulkStockEntryView: React.FC = () => {
                 />
               </div>
 
+              {/* Barcode Field */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>الباركود (اختياري)</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowCameraScanner(true)}
+                    className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200 cursor-pointer"
+                  >
+                    <Camera className="w-3 h-3 text-indigo-600" />
+                    <span>مسح بالكاميرا 📷</span>
+                  </button>
+                </label>
+                <input
+                  type="text"
+                  value={newMedForm.barcode}
+                  onChange={(e) => setNewMedForm({ ...newMedForm, barcode: e.target.value })}
+                  placeholder="امسح الباركود أو اكتبه..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono font-bold text-slate-800"
+                />
+              </div>
+
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">الشكل</label>
@@ -1497,7 +1533,11 @@ export const BulkStockEntryView: React.FC = () => {
         isOpen={showCameraScanner}
         onClose={() => setShowCameraScanner(false)}
         onScan={(scannedBarcode) => {
-          handleSearch(scannedBarcode);
+          if (showNewMedModal) {
+            setNewMedForm((prev) => ({ ...prev, barcode: scannedBarcode }));
+          } else {
+            handleSearch(scannedBarcode);
+          }
         }}
         title="مسح باركود الدواء لكشوفات الشحنة بكاميرا الجهاز"
       />

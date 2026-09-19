@@ -589,6 +589,14 @@ export class InventoryService {
 
           processedMedicineIds.push(finalMedicineId);
 
+          if (item.barcode && item.barcode.trim().length > 0) {
+            await tx.$executeRawUnsafe(
+              `UPDATE public.medicines SET barcode = $1 WHERE id = $2::uuid AND (barcode IS NULL OR barcode = '' OR barcode != $1);`,
+              item.barcode.trim(),
+              finalMedicineId,
+            );
+          }
+
           // 1.2 Financial & Bonus calculations
           const qtyPacks = Number(item.quantityPacks || 1);
           const bonusPacks = Number(item.bonusPacks || 0);
@@ -1361,6 +1369,14 @@ export class InventoryService {
       dto.shelfLocation !== undefined ? dto.shelfLocation : null,
       inventoryItemId,
     );
+
+    if (dto.barcode !== undefined && medicineId) {
+      await this.prisma.$executeRawUnsafe(
+        `UPDATE public.medicines SET barcode = $1 WHERE id = $2::uuid;`,
+        dto.barcode.trim() || null,
+        medicineId,
+      );
+    }
 
     // Record Enterprise Audit Log Entry
     await this.auditLogService.log(

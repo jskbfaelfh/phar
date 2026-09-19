@@ -18,6 +18,7 @@ import {
 import { apiRequest } from '../api/client';
 import { SmartExpiryInput } from './SmartExpiryInput';
 import { PriceChangesReviewModal, type ChangedPriceItem } from './PriceChangesReviewModal';
+import { CameraBarcodeScannerModal } from './CameraBarcodeScannerModal';
 
 export interface ScannedItem {
   id: string;
@@ -88,6 +89,8 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
 
   const [showPriceChangesModal, setShowPriceChangesModal] = useState(false);
   const [changedItemsForReview, setChangedItemsForReview] = useState<ChangedPriceItem[]>([]);
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
+  const [activeScanRowIdx, setActiveScanRowIdx] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Automatic smart compression on file select
@@ -904,15 +907,28 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
 
                               {/* 2. Barcode */}
                               <td className="p-2.5">
-                                <input
-                                  id={`scanner-barcode-${idx}`}
-                                  type="text"
-                                  value={item.barcode}
-                                  onChange={(e) => updateItemField(idx, 'barcode', e.target.value)}
-                                  onKeyDown={(e) => handleKeyDownNav(e, `scanner-units-${idx}`)}
-                                  placeholder="فارغ أو امسحه"
-                                  className="w-full p-1.5 bg-slate-50 border border-slate-200 rounded-lg font-mono text-slate-800 text-xs focus:bg-white focus:border-emerald-500 focus:outline-hidden"
-                                />
+                                <div className="relative flex items-center">
+                                  <input
+                                    id={`scanner-barcode-${idx}`}
+                                    type="text"
+                                    value={item.barcode}
+                                    onChange={(e) => updateItemField(idx, 'barcode', e.target.value)}
+                                    onKeyDown={(e) => handleKeyDownNav(e, `scanner-units-${idx}`)}
+                                    placeholder="امسح أو اكتب..."
+                                    className="w-full p-1.5 pl-7 bg-slate-50 border border-slate-200 rounded-lg font-mono text-slate-800 text-xs focus:bg-white focus:border-emerald-500 focus:outline-hidden"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveScanRowIdx(idx);
+                                      setShowCameraScanner(true);
+                                    }}
+                                    className="absolute left-1 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-emerald-600 cursor-pointer"
+                                    title="مسح الباركود بالكاميرا"
+                                  >
+                                    <Camera className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               </td>
 
                               {/* 3. Units Per Pack */}
@@ -1297,6 +1313,20 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
         }}
         onCancel={() => setShowPriceChangesModal(false)}
         isSubmitting={submitting}
+      />
+
+      <CameraBarcodeScannerModal
+        isOpen={showCameraScanner}
+        onClose={() => {
+          setShowCameraScanner(false);
+          setActiveScanRowIdx(null);
+        }}
+        onScan={(scannedBarcode) => {
+          if (activeScanRowIdx !== null && activeScanRowIdx >= 0) {
+            updateItemField(activeScanRowIdx, 'barcode', scannedBarcode);
+          }
+        }}
+        title="مسح باركود الدواء بكاميرا الجهاز"
       />
     </div>
   );

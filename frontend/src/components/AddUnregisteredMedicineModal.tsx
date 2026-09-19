@@ -8,8 +8,10 @@ import {
   Building2,
   Layers,
   FlaskConical,
+  Camera,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
+import { CameraBarcodeScannerModal } from './CameraBarcodeScannerModal';
 
 interface AddUnregisteredMedicineModalProps {
   initialSearch?: string;
@@ -31,6 +33,7 @@ export const AddUnregisteredMedicineModal: React.FC<AddUnregisteredMedicineModal
   const [defaultUnitsPerPack, setDefaultUnitsPerPack] = useState(1);
   const [barcode, setBarcode] = useState(initialBarcode);
   const [manufacturer, setManufacturer] = useState('');
+  const [showCameraScanner, setShowCameraScanner] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -255,9 +258,19 @@ export const AddUnregisteredMedicineModal: React.FC<AddUnregisteredMedicineModal
           {/* Barcode & Manufacturer */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                <Barcode className="w-3.5 h-3.5 text-indigo-600" />
-                الباركود (اختياري)
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                <span className="flex items-center gap-1">
+                  <Barcode className="w-3.5 h-3.5 text-indigo-600" />
+                  الباركود (اختياري)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowCameraScanner(true)}
+                  className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200 cursor-pointer"
+                >
+                  <Camera className="w-3 h-3 text-indigo-600" />
+                  <span>مسح بالكاميرا 📷</span>
+                </button>
               </label>
               <input
                 type="text"
@@ -316,6 +329,15 @@ export const AddUnregisteredMedicineModal: React.FC<AddUnregisteredMedicineModal
           </div>
         </form>
       </div>
+
+      <CameraBarcodeScannerModal
+        isOpen={showCameraScanner}
+        onClose={() => setShowCameraScanner(false)}
+        onScan={(scannedBarcode) => {
+          setBarcode(scannedBarcode);
+        }}
+        title="مسح باركود الدواء بكاميرا الجهاز"
+      />
     </div>
   );
 };
