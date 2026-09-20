@@ -32,6 +32,12 @@ export class InventoryController {
     return this.inventoryService.getPharmacyInventory(query);
   }
 
+  @Patch('auto-assign-barcodes')
+  @Roles('OWNER')
+  async autoAssignBarcodes() {
+    return this.inventoryService.autoAssignSequentialBarcodes();
+  }
+
   @Get('batches/trace/:batchNumber')
   @Roles('OWNER')
   async getBatchTraceability(@Param('batchNumber') batchNumber: string) {

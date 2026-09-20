@@ -48,12 +48,31 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'ALL' | 'LOW_STOCK' | 'EXPIRING_SOON'>('ALL');
+  const [activeFilter, setActiveFilter] = useState<'ALL' | 'LOW_STOCK' | 'EXPIRING_SOON' | 'NO_BARCODE'>('ALL');
 
   // Exact real-time counts from local DB / backend summary
   const [totalCount, setTotalCount] = useState<number>(0);
   const [lowStockCount, setLowStockCount] = useState<number>(0);
   const [expiringCount, setExpiringCount] = useState<number>(0);
+
+  // No Barcode items count calculation
+  const noBarcodeCount = React.useMemo(() => {
+    return items.filter((it) => !it.barcode || String(it.barcode).trim() === '').length;
+  }, [items]);
+
+  const filteredItems = React.useMemo(() => {
+    return items.filter((it) => {
+      if (activeFilter === 'LOW_STOCK') {
+        const units = Number(it.validUnitsRemaining ?? it.totalUnitsRemaining ?? 0);
+        const minAlert = Number(it.minAlertUnits || 5);
+        return units <= minAlert;
+      }
+      if (activeFilter === 'NO_BARCODE') {
+        return !it.barcode || String(it.barcode).trim() === '';
+      }
+      return true;
+    });
+  }, [items, activeFilter]);
 
   // Suppliers filter
   const [suppliers, setSuppliers] = useState<any[]>([]);
@@ -307,14 +326,50 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
 
   const openEditModal = (item: any) => {
     setEditingItem(item);
+    let initialBarcode = item.barcode || '';
+    if (!initialBarcode) {
+      let maxNum = 0;
+      items.forEach((it) => {
+        if (it.barcode && /^[0-9]+$/.test(String(it.barcode).trim())) {
+          const n = parseInt(String(it.barcode).trim(), 10);
+          if (n > maxNum && n < 100000) maxNum = n;
+        }
+      });
+      initialBarcode = String(maxNum + 1);
+    }
+
     setEditForm({
       customName: item.customName || '',
-      barcode: item.barcode || '',
+      barcode: initialBarcode,
       sellingPricePack: Number(item.sellingPricePack || 0),
       sellingPriceUnit: Number(item.sellingPriceUnit || 0),
       minAlertUnits: Number(item.minAlertUnits || 5),
       shelfLocation: item.shelfLocation || '',
     });
+  };
+
+  const handleAutoAssignBarcodes = async () => {
+    if (
+      !confirm(
+        'هل تريد توليد أرقام باركود تسلسلية سريعة (1، 2، 3...) تلقائياً لجميع المواد الخالية من الباركود؟',
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const res = await apiRequest<any>('/inventory/auto-assign-barcodes', {
+        method: 'PATCH',
+      });
+      setMessage({
+        type: 'success',
+        text: res.message || 'تم ترقيم المواد بنجاح!',
+      });
+      fetchInventory();
+      fetchSummaryCounts();
+    } catch (err: any) {
+      alert(err.message || 'فشل توليد الباركود التلقائي');
+    }
   };
 
   const handleUpdatePrice = async (e: React.FormEvent) => {
@@ -429,7 +484,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
       {currentTab === 'INVENTORY' && (
         <div className="space-y-5">
           {/* Fast Overview Stat Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5">
             {/* Card 1: Total Medicines */}
             <button
               onClick={() => setActiveFilter('ALL')}
@@ -508,6 +563,34 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                 )}
               </div>
             </button>
+
+            {/* Card 4: No Barcode Items */}
+            <button
+              onClick={() => setActiveFilter('NO_BARCODE')}
+              className={`p-4 rounded-2xl border text-right transition-all cursor-pointer ${
+                activeFilter === 'NO_BARCODE'
+                  ? 'bg-purple-600 text-white border-purple-600 shadow-md ring-2 ring-purple-400 ring-offset-2'
+                  : 'bg-purple-50 text-purple-950 border-purple-200 hover:border-purple-300'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="font-bold text-xs">بدون باركود</div>
+                <Barcode className="w-5 h-5 text-purple-700" />
+              </div>
+              <div className="text-xl font-black mt-1.5 text-purple-950 font-mono">
+                {noBarcodeCount} <span className="text-xs font-normal">مادة</span>
+              </div>
+              <div className="mt-1 text-[11px] text-purple-800">
+                {activeFilter === 'NO_BARCODE' ? (
+                  <span className="text-purple-950 font-bold bg-purple-200/70 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                    <Filter className="w-3 h-3" />
+                    تصفية بدون باركود
+                  </span>
+                ) : (
+                  'تخصيص باركود 1-1000'
+                )}
+              </div>
+            </button>
           </div>
 
           {/* Search & Supplier Filter Bar */}
@@ -573,6 +656,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                 <Plus className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">دواء جديد +</span>
               </button>
+
+              {/* Auto Assign Short Barcodes Button */}
+              {noBarcodeCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleAutoAssignBarcodes}
+                  className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95 shadow-xs animate-in fade-in"
+                  title="توليد أرقام تسلسلية تلقائية (1، 2، 3...) لكل المواد التي لا تحتوي على باركود"
+                >
+                  <Barcode className="w-3.5 h-3.5 text-purple-200" />
+                  <span>ترقيم تلقائي ({noBarcodeCount}) ⚡</span>
+                </button>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
@@ -711,15 +807,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                         جاري التحميل...
                       </td>
                     </tr>
-                  ) : items.length === 0 ? (
+                  ) : filteredItems.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="p-12 text-center text-slate-400">
                         <Package className="w-12 h-12 stroke-1 text-slate-300 mx-auto mb-2" />
-                        لا توجد نتائج
+                        لا توجد نتائج في هذه التصفية
                       </td>
                     </tr>
                   ) : (
-                    items.map((item) => (
+                    filteredItems.map((item) => (
                       <tr key={item.id} className="hover:bg-slate-50/60 transition-colors">
                         {/* Name & Shelf */}
                         <td className="p-4">
@@ -753,11 +849,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                         {/* Barcode */}
                         <td className="p-4">
                           {item.barcode ? (
-                            <span className="font-mono text-[11px] font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-lg inline-block">
-                              {item.barcode}
+                            <span className="font-mono text-[11px] font-bold text-purple-900 bg-purple-50 border border-purple-200 px-2 py-1 rounded-lg inline-flex items-center gap-1">
+                              🏷️ {item.barcode}
                             </span>
                           ) : (
-                            <span className="text-slate-300 text-[11px]">—</span>
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(item)}
+                              className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 rounded-lg text-[11px] font-black inline-flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-2xs"
+                              title="انقر لتخصيص باركود أو رقم قصير لسرعة البيع والكاشير"
+                            >
+                              <span>🚫 بدون باركود</span>
+                              <span className="text-amber-700 underline font-black mr-0.5">+ تعيين رقم</span>
+                            </button>
                           )}
                         </td>
 

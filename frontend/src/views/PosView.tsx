@@ -1159,8 +1159,40 @@ export const PosView: React.FC = () => {
                 ref={searchInputRef}
                 type="text"
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="ابحث بالاسم أو امسح الباركود..."
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ' || e.code === 'Space') {
+                    const trimmed = searchTerm.trim().toLowerCase();
+                    if (trimmed.length > 0) {
+                      const exactMatch = searchResults.find(
+                        (med) => (med.barcode || '').trim().toLowerCase() === trimmed,
+                      );
+                      if (exactMatch) {
+                        e.preventDefault();
+                        addToCart(exactMatch, 'PACK');
+                        setSearchTerm('');
+                        setSearchResults([]);
+                      }
+                    }
+                  }
+                }}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSearchTerm(val);
+                  if (val.endsWith(' ')) {
+                    const trimmed = val.trim().toLowerCase();
+                    if (trimmed.length > 0) {
+                      const exactMatch = searchResults.find(
+                        (med) => (med.barcode || '').trim().toLowerCase() === trimmed,
+                      );
+                      if (exactMatch) {
+                        addToCart(exactMatch, 'PACK');
+                        setSearchTerm('');
+                        setSearchResults([]);
+                      }
+                    }
+                  }
+                }}
+                placeholder="ابحث بالاسم أو امسح/اكتب رقم الباركود المفرد (مثلاً 1 + مسافة)..."
                 className="w-full pr-12 pl-4 py-3 sm:py-3.5 bg-white border-2 border-slate-200 rounded-2xl text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm sm:text-base font-black shadow-xs transition-all"
               />
             </div>
@@ -1227,13 +1259,19 @@ export const PosView: React.FC = () => {
             ) : (
               searchResults.map((med) => {
                 const hasMultipleBatches = med.activeBatches && med.activeBatches.length > 1;
+                const isExactBarcode = (med.barcode || '').trim().toLowerCase() === searchTerm.trim().toLowerCase();
 
                 return (
-                  <div key={med.id} className="p-3 sm:p-4 hover:bg-slate-50/90 rounded-2xl transition-all border-b border-slate-100 last:border-0">
+                  <div key={med.id} className={`p-3 sm:p-4 rounded-2xl transition-all border-b border-slate-100 last:border-0 ${isExactBarcode ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-400' : 'hover:bg-slate-50/90'}`}>
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-black text-slate-900 text-base sm:text-lg">{med.tradeName}</span>
+                          {med.barcode && (
+                            <span className={`px-2.5 py-1 rounded-xl text-xs font-black font-mono shadow-2xs ${isExactBarcode ? 'bg-emerald-700 text-white animate-pulse' : 'bg-purple-50 text-purple-900 border border-purple-200'}`}>
+                              🏷️ باركود: {med.barcode} {isExactBarcode ? '⚡ (مطابق)' : ''}
+                            </span>
+                          )}
                           {med.shelfLocation && (
                             <span className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-300 rounded-xl text-xs font-black font-mono shadow-2xs">
                               📍 {med.shelfLocation}

@@ -213,6 +213,14 @@ export async function searchLocalInventory(searchTerm: string): Promise<any[]> {
         );
       });
 
+      filtered.sort((a, b) => {
+        const bCodeA = (a.barcode || '').trim().toLowerCase();
+        const bCodeB = (b.barcode || '').trim().toLowerCase();
+        if (bCodeA === term && bCodeB !== term) return -1;
+        if (bCodeB === term && bCodeA !== term) return 1;
+        return 0;
+      });
+
       resolve(filtered.slice(0, 40));
     };
 

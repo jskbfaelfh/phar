@@ -865,9 +865,13 @@ export class InventoryService {
     let searchFilter = '';
     const params: any[] = [];
 
+    let exactParamIndex = 0;
     if (query?.search && query.search.trim().length > 0) {
-      params.push(`%${query.search.trim()}%`);
-      searchFilter += ` AND (m.trade_name ILIKE $${params.length} OR m.scientific_name ILIKE $${params.length} OR m.barcode ILIKE $${params.length} OR i.custom_name ILIKE $${params.length} OR i.shelf_location ILIKE $${params.length})`;
+      const term = query.search.trim();
+      params.push(`%${term}%`);
+      params.push(term);
+      exactParamIndex = params.length;
+      searchFilter += ` AND (m.trade_name ILIKE $${params.length - 1} OR m.scientific_name ILIKE $${params.length - 1} OR m.barcode ILIKE $${params.length - 1} OR i.custom_name ILIKE $${params.length - 1} OR i.shelf_location ILIKE $${params.length - 1} OR LOWER(TRIM(m.barcode)) = LOWER($${params.length}))`;
     }
 
     if (query?.shelfLocation && query.shelfLocation.trim().length > 0) {
@@ -885,6 +889,10 @@ export class InventoryService {
       ? `HAVING COALESCE(SUM(CASE WHEN b.expiry_date >= CURRENT_DATE AND (b.is_recalled IS FALSE OR b.is_recalled IS NULL) THEN b.quantity_units_remaining ELSE 0 END), 0) > 0`
       : '';
 
+    const orderByClause = exactParamIndex > 0
+      ? `ORDER BY CASE WHEN LOWER(TRIM(m.barcode)) = LOWER($${exactParamIndex}) THEN 0 ELSE 1 END, COALESCE(i.custom_name, m.trade_name, '') ASC`
+      : `ORDER BY COALESCE(i.custom_name, m.trade_name, '') ASC`;
+
     const sql = `
       SELECT 
         i.id,
@@ -892,6 +900,7 @@ export class InventoryService {
         i.custom_name as "customName",
         i.units_per_pack as "unitsPerPack",
         i.shelf_location as "shelfLocation",
+        m.barcode as "barcode",
         COALESCE(
           (SELECT b_sub.selling_price_pack 
            FROM "${schemaName}".inventory_batches b_sub 
@@ -955,7 +964,7 @@ export class InventoryService {
       WHERE 1=1 ${searchFilter}
       GROUP BY i.id, m.id, m.trade_name, m.scientific_name, m.dosage_form, m.strength, m.manufacturer, m.barcode
       ${havingClause}
-      ORDER BY COALESCE(i.custom_name, m.trade_name, '') ASC;
+      ${orderByClause};
     `;
 
     const items: any[] = await this.prisma.$queryRawUnsafe(sql, ...params);
@@ -2010,6 +2019,62 @@ export class InventoryService {
       },
       suppliers: suppliersList,
       allItems: filteredItems,
+    };
+  }
+
+  /**
+   * Auto-assign sequential integer barcodes (1, 2, 3...) to unbarcoded inventory items
+   */
+  async autoAssignSequentialBarcodes() {
+    const schemaName = this.tenantContext.getSchemaName();
+    const tenantId = this.tenantContext.getTenantId();
+
+    const itemsWithoutBarcode: any[] = await this.prisma.$queryRawUnsafe(`
+      SELECT ii.id, ii.medicine_id as "medicineId", m.barcode
+      FROM "${schemaName}".inventory_items ii
+      JOIN public.medicines m ON ii.medicine_id = m.id
+      WHERE m.barcode IS NULL OR TRIM(m.barcode) = ''
+      ORDER BY ii.created_at ASC
+    `);
+
+    if (itemsWithoutBarcode.length === 0) {
+      return { count: 0, message: 'جميع المواد تحتوي على باركود بالفعل' };
+    }
+
+    // Find current maximum integer barcode among numeric barcodes
+    const allBarcodesRes: any[] = await this.prisma.$queryRawUnsafe(`
+      SELECT m.barcode
+      FROM "${schemaName}".inventory_items ii
+      JOIN public.medicines m ON ii.medicine_id = m.id
+      WHERE m.barcode IS NOT NULL AND TRIM(m.barcode) ~ '^[0-9]+$'
+    `);
+
+    let maxCode = 0;
+    for (const row of allBarcodesRes) {
+      const val = parseInt(row.barcode, 10);
+      if (!isNaN(val) && val > maxCode && val < 100000) {
+        maxCode = val;
+      }
+    }
+
+    let currentCode = maxCode > 0 ? maxCode + 1 : 1;
+    let assignedCount = 0;
+
+    for (const item of itemsWithoutBarcode) {
+      await this.prisma.$executeRawUnsafe(
+        `UPDATE public.medicines SET barcode = $1 WHERE id = $2::uuid`,
+        String(currentCode),
+        item.medicineId,
+      );
+      currentCode++;
+      assignedCount++;
+    }
+
+    this.eventEmitter.emit('inventory.synced', { tenantId, action: 'AUTO_BARCODE_ASSIGNED' });
+
+    return {
+      count: assignedCount,
+      message: `تم توليد وتسلسل باركود محلي تلقائياً لعدد (${assignedCount}) مادة بدون باركود`,
     };
   }
 }
