@@ -11,6 +11,7 @@ import {
   Printer,
   Sparkles,
   Camera,
+  Zap,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { SmartInvoiceScannerModal } from '../components/SmartInvoiceScannerModal';
@@ -50,6 +51,7 @@ export const PurchasesView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<PurchaseInvoice | null>(null);
   const [showAiScanModal, setShowAiScanModal] = useState(false);
+  const [modalSkipMatching, setModalSkipMatching] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [earlyDiscountAlerts, setEarlyDiscountAlerts] = useState<any[]>([]);
   const [applyingDiscountId, setApplyingDiscountId] = useState<string | null>(null);
@@ -130,13 +132,28 @@ export const PurchasesView: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowAiScanModal(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-900/20 active:scale-95 transition-all cursor-pointer"
-            title="مسح فاتورة الشراء بالكاميرا"
+            onClick={() => {
+              setModalSkipMatching(false);
+              setShowAiScanModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-900/20 active:scale-95 transition-all cursor-pointer"
+            title="مسح ذكي للفاتورة مع مطابقة الكتالوج الدوائي"
           >
             <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
             <Camera className="w-4 h-4" />
-            <span>مسح فاتورة (كاميرا) 📷</span>
+            <span>🤖 مسح ذكي (مع مطابقة)</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setModalSkipMatching(true);
+              setShowAiScanModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 bg-linear-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white rounded-xl text-xs font-black shadow-md shadow-orange-900/20 active:scale-95 transition-all cursor-pointer"
+            title="مسح استخراجي مباشر - قراءة نص الورقة فقط بدون مطابقة الدليل"
+          >
+            <Zap className="w-4 h-4 text-yellow-200" />
+            <span>⚡ مسح مباشر (بدون مطابقة)</span>
           </button>
         </div>
       </div>
@@ -427,6 +444,7 @@ export const PurchasesView: React.FC = () => {
       {/* Smart AI OCR Invoice Scanner Modal */}
       {showAiScanModal && (
         <SmartInvoiceScannerModal
+          initialSkipMatching={modalSkipMatching}
           onClose={() => setShowAiScanModal(false)}
           onSuccess={(savedInvoice) => {
             setShowAiScanModal(false);

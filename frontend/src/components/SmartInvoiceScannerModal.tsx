@@ -14,6 +14,7 @@ import {
   Tag,
   Hash,
   BadgePercent,
+  Zap,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { SmartExpiryInput } from './SmartExpiryInput';
@@ -53,12 +54,15 @@ export interface MonthlyDiscountTier {
 interface SmartInvoiceScannerModalProps {
   onClose: () => void;
   onSuccess: (savedInvoice: any) => void;
+  initialSkipMatching?: boolean;
 }
 
 export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> = ({
   onClose,
   onSuccess,
+  initialSkipMatching = false,
 }) => {
+  const [skipMatching, setSkipMatching] = useState<boolean>(initialSkipMatching);
   // Stepper: UPLOAD -> PROCESSING -> REVIEW
   const [step, setStep] = useState<'UPLOAD' | 'PROCESSING' | 'REVIEW'>('UPLOAD');
   const [processingStage, setProcessingStage] = useState<string>('قراءة النصوص البصرية (OCR)...');
@@ -143,13 +147,18 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
       setProcessingStage('🧠 جاري قراءة أسماء المواد، التراكيز، الكميات، والأسعار بدقة...');
       await new Promise((r) => setTimeout(r, 700));
 
-      setProcessingStage('🔎 جاري المطابقة المباشرة مع الدليل الدوائي المركزي (28,500 مادة)...');
+      if (skipMatching) {
+        setProcessingStage('⚡ مسح استخراجي مباشر - قراءة النصوص المطبوعة بالفاتورة فقط بدون مطابقة...');
+      } else {
+        setProcessingStage('🔎 جاري المطابقة المباشرة مع الدليل الدوائي المركزي (28,500 مادة)...');
+      }
 
       const response = await apiRequest<any>('/purchases/ai-scan-invoice', {
         method: 'POST',
         body: JSON.stringify({
           imageBase64: imgToSend || 'data:image/jpeg;base64,sample',
           rawTextHint: rawTextHint.trim() || undefined,
+          skipMatching: skipMatching,
         }),
       });
 
@@ -534,6 +543,42 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
                 <p className="text-xs text-slate-500 font-medium">
                   يقوم النظام باستخراج الأدوية بدقة وتنقيتها (الاسم + التركيز فقط) بدون تخمين أي بيانات غير مطبوعة
                 </p>
+
+                {/* Mode Selector */}
+                <div className="pt-2 flex flex-col items-center gap-2">
+                  <div className="inline-flex p-1 bg-slate-200/80 rounded-2xl border border-slate-300/60 shadow-inner">
+                    <button
+                      type="button"
+                      onClick={() => setSkipMatching(false)}
+                      className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                        !skipMatching
+                          ? 'bg-emerald-700 text-white shadow-md'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/50'
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      <span>🧠 مسح ذكي (مع مطابقة الكتالوج)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSkipMatching(true)}
+                      className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                        skipMatching
+                          ? 'bg-amber-600 text-white shadow-md'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/50'
+                      }`}
+                    >
+                      <Zap className="w-3.5 h-3.5 text-yellow-300" />
+                      <span>⚡ مسح مباشر (بدون مطابقة - نص الورقة فقط)</span>
+                    </button>
+                  </div>
+
+                  <div className="text-[11px] font-bold px-3 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-600">
+                    {skipMatching
+                      ? '⚡ وضع المسح المباشر: يستخرج النصوص من الورقة مباشرة، مع ترك الباركود والموقع غير المطبوعين فارغة تماماً دون أي تخمين.'
+                      : '🧠 وضع المطابقة الذكية: يستخرج البيانات ويطابق الأدوية مع الدليل الدوائي المركزي لمزامنة الأصناف التلقائية.'}
+                  </div>
+                </div>
               </div>
 
               {/* Upload Dropzone */}

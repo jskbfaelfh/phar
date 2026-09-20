@@ -123,8 +123,9 @@ export class OcrAiService {
   async processInvoiceImage(
     tenantId: string,
     imageBase64: string,
+    skipMatching = false,
   ): Promise<ScannedInvoiceResult> {
-    this.logger.log(`Processing real AI OCR for tenant: ${tenantId}`);
+    this.logger.log(`Processing real AI OCR for tenant: ${tenantId} (skipMatching: ${skipMatching})`);
 
     // 1. Check Pharmacy-specific Gemini API Key
     const tenant = await this.prisma.tenant.findUnique({
@@ -184,16 +185,16 @@ export class OcrAiService {
     let discrepanciesCount = 0;
 
     for (const item of aiParsedData.items) {
-      const rawName = String(item.rawName || '').trim();
+      const rawName = String(item.rawName || item.tradeName || '').trim();
 
-      // Strict rule: Trade Name + Strength ONLY (no forms, no packaging, no company noise)
-      const { cleanName, cleanStrength } = cleanTradeNameWithStrength(
-        item.tradeName || rawName,
-        item.strength
-      );
-
-      const barcode = item.barcode ? String(item.barcode).trim() : undefined;
-      const matchResult = await this.matchMedicineInMasterDb(cleanName, barcode);
+      let matchedMedicineId: string | null = null;
+      let matchedTradeName = rawName || 'دواء جديد';
+      let scientificName: string = item.scientificName ? String(item.scientificName).trim() : '';
+      let barcode: string = item.barcode ? String(item.barcode).trim() : '';
+      let matchConfidence: 'HIGH' | 'MEDIUM' | 'LOW' = 'HIGH';
+      let existingBatch: any = null;
+      let existingItem: any = null;
+      let shelfLocation = '';
 
       const purchasePrice = Number(item.purchasePricePack || 0);
       const quantityPacks = Number(item.quantityPacks || 1);
@@ -203,8 +204,8 @@ export class OcrAiService {
       // ZERO GUESSWORK: Only use sellingPricePack if printed, do NOT guess price
       const sellingPrice = Number(item.sellingPricePack || 0);
 
-      // ZERO GUESSWORK: Do NOT guess expiry dates (+2 years)
       const discrepancies: string[] = [];
+
       let expiryDate = '';
       if (item.expiryDate && item.expiryDate !== 'N/A' && item.expiryDate !== 'null') {
         expiryDate = String(item.expiryDate).trim();
@@ -222,88 +223,104 @@ export class OcrAiService {
         }
       }
 
-      // ZERO GUESSWORK: Do NOT invent batch numbers
       const batchNumber = item.batchNumber && item.batchNumber !== 'N/A' && item.batchNumber !== 'null'
         ? String(item.batchNumber).trim()
         : '';
 
-      if (matchResult.confidence === 'LOW') {
-        discrepancies.push('💡 صنف جديد في مخزنك - سيتم إدراجه وتفعيل بيعه');
-      } else if (matchResult.confidence === 'MEDIUM') {
-        discrepancies.push(`💡 تم مطابقة الصنف مع: ${matchResult.tradeName}`);
+      if (!skipMatching) {
+        // Mode 1: Match against Master Drug Database & Previous Pharmacy Inventory
+        const { cleanName, cleanStrength } = cleanTradeNameWithStrength(
+          item.tradeName || rawName,
+          item.strength,
+        );
+        const matchResult = await this.matchMedicineInMasterDb(cleanName, barcode || undefined);
+        matchedMedicineId = matchResult.medicine?.id || null;
+        matchedTradeName = matchResult.medicine?.tradeName
+          ? cleanTradeNameWithStrength(matchResult.medicine.tradeName, cleanStrength).cleanName
+          : cleanName;
+        scientificName = matchResult.scientificName || scientificName;
+        barcode = matchResult.barcode || barcode;
+        matchConfidence = matchResult.confidence;
+
+        if (matchResult.confidence === 'LOW') {
+          discrepancies.push('💡 صنف جديد في مخزنك - سيتم إدراجه وتفعيل بيعه');
+        } else if (matchResult.confidence === 'MEDIUM') {
+          discrepancies.push(`💡 تم مطابقة الصنف مع: ${matchResult.tradeName}`);
+        }
+
+        // Fetch last known history from the pharmacy's inventory for this item by barcode / medicine_id / name
+        const effectiveBarcode = matchResult.barcode || barcode;
+        const effectiveMedId = matchResult.medicine?.id;
+
+        try {
+          if (tenant?.schemaName) {
+            const schema = tenant.schemaName;
+            let itemSql = `
+              SELECT ii.id, ii.custom_name as "customName", ii.units_per_pack as "unitsPerPack",
+                     ii.selling_price_pack as "sellingPricePack", ii.selling_price_unit as "sellingPriceUnit",
+                     ii.shelf_location as "shelfLocation"
+              FROM "${schema}".inventory_items ii
+              LEFT JOIN public.medicines m ON ii.medicine_id = m.id
+              WHERE 1=0
+            `;
+            const itemParams: any[] = [];
+            if (effectiveBarcode && effectiveBarcode.length > 3) {
+              itemParams.push(effectiveBarcode);
+              itemSql += ` OR m.barcode = $${itemParams.length}`;
+            }
+            if (effectiveMedId) {
+              itemParams.push(effectiveMedId);
+              itemSql += ` OR ii.medicine_id = $${itemParams.length}::uuid`;
+            }
+            if (cleanName && cleanName.length > 2) {
+              itemParams.push(`%${cleanName}%`);
+              itemSql += ` OR m.trade_name ILIKE $${itemParams.length} OR ii.custom_name ILIKE $${itemParams.length}`;
+            }
+            itemSql += ` ORDER BY ii.updated_at DESC LIMIT 1`;
+
+            if (itemParams.length > 0) {
+              const foundItems: any[] = await this.prisma.$queryRawUnsafe(itemSql, ...itemParams);
+              if (foundItems.length > 0) {
+                existingItem = foundItems[0];
+
+                const foundBatches: any[] = await this.prisma.$queryRawUnsafe(
+                  `SELECT batch_number as "batchNumber",
+                          TO_CHAR(expiry_date, 'YYYY-MM-DD') as "expiryDate",
+                          purchase_price_pack as "purchasePricePack",
+                          selling_price_pack as "sellingPricePack",
+                          selling_price_unit as "sellingPriceUnit"
+                   FROM "${schema}".inventory_batches
+                   WHERE inventory_item_id = $1::uuid
+                   ORDER BY created_at DESC
+                   LIMIT 1`,
+                  existingItem.id,
+                );
+                if (foundBatches.length > 0) {
+                  existingBatch = foundBatches[0];
+                }
+              }
+            }
+          }
+        } catch (err: any) {
+          this.logger.warn(`Could not lookup existing inventory history in OCR: ${err.message}`);
+        }
+      } else {
+        // Mode 2: Direct Raw Mode (No Catalog Matching) - Extract raw printed text ONLY, non-printed fields remain strictly EMPTY!
+        discrepancies.push('⚡ مسح مباشر بدون مطابقة - تم استخراج النص المطبوع بالفاتورة فقط');
       }
 
       if (bonusQuantity > 0) {
         discrepancies.push(`🎁 يشتمل على بونص مجاني (${bonusQuantity} علب هدايا)`);
       }
 
-      // Fetch last known history from the pharmacy's inventory for this item by barcode / medicine_id / name
-      const effectiveBarcode = matchResult.barcode || barcode;
-      const effectiveMedId = matchResult.medicine?.id;
-      let existingItem: any = null;
-      let existingBatch: any = null;
-
-      try {
-        if (tenant?.schemaName) {
-          const schema = tenant.schemaName;
-          let itemSql = `
-            SELECT ii.id, ii.custom_name as "customName", ii.units_per_pack as "unitsPerPack",
-                   ii.selling_price_pack as "sellingPricePack", ii.selling_price_unit as "sellingPriceUnit",
-                   ii.shelf_location as "shelfLocation"
-            FROM "${schema}".inventory_items ii
-            LEFT JOIN public.medicines m ON ii.medicine_id = m.id
-            WHERE 1=0
-          `;
-          const itemParams: any[] = [];
-          if (effectiveBarcode && effectiveBarcode.length > 3) {
-            itemParams.push(effectiveBarcode);
-            itemSql += ` OR m.barcode = $${itemParams.length}`;
-          }
-          if (effectiveMedId) {
-            itemParams.push(effectiveMedId);
-            itemSql += ` OR ii.medicine_id = $${itemParams.length}::uuid`;
-          }
-          if (cleanName && cleanName.length > 2) {
-            itemParams.push(`%${cleanName}%`);
-            itemSql += ` OR m.trade_name ILIKE $${itemParams.length} OR ii.custom_name ILIKE $${itemParams.length}`;
-          }
-          itemSql += ` ORDER BY ii.updated_at DESC LIMIT 1`;
-
-          if (itemParams.length > 0) {
-            const foundItems: any[] = await this.prisma.$queryRawUnsafe(itemSql, ...itemParams);
-            if (foundItems.length > 0) {
-              existingItem = foundItems[0];
-
-              const foundBatches: any[] = await this.prisma.$queryRawUnsafe(
-                `SELECT batch_number as "batchNumber",
-                        TO_CHAR(expiry_date, 'YYYY-MM-DD') as "expiryDate",
-                        purchase_price_pack as "purchasePricePack",
-                        selling_price_pack as "sellingPricePack",
-                        selling_price_unit as "sellingPriceUnit"
-                 FROM "${schema}".inventory_batches
-                 WHERE inventory_item_id = $1::uuid
-                 ORDER BY created_at DESC
-                 LIMIT 1`,
-                existingItem.id,
-              );
-              if (foundBatches.length > 0) {
-                existingBatch = foundBatches[0];
-              }
-            }
-          }
-        }
-      } catch (err: any) {
-        this.logger.warn(`Could not lookup existing inventory history in OCR: ${err.message}`);
-      }
-
-      // 1. Units per pack: take from pharmacy's existing inventory first
+      // 1. Units per pack: take from pharmacy's existing inventory first if not skipMatching
       const units = Number(
-        existingItem?.unitsPerPack || matchResult.medicine?.unitsPerPack || item.unitsPerPack || 1,
+        (!skipMatching && existingItem?.unitsPerPack) || item.unitsPerPack || 1,
       );
 
-      // 2. Selling Price: if invoice has no retail selling price, autofill from pharmacy's existing record
+      // 2. Selling Price: if invoice has no retail selling price and NOT skipMatching, autofill from pharmacy's existing record
       let finalSellingPrice = sellingPrice;
-      if (finalSellingPrice <= 0) {
+      if (finalSellingPrice <= 0 && !skipMatching) {
         finalSellingPrice = Number(
           existingItem?.sellingPricePack || existingBatch?.sellingPricePack || 0,
         );
@@ -311,7 +328,7 @@ export class OcrAiService {
 
       // Selling Price Unit
       let unitPrice = Number(item.sellingPriceUnit || 0);
-      if (unitPrice <= 0) {
+      if (unitPrice <= 0 && !skipMatching) {
         unitPrice = Number(
           existingItem?.sellingPriceUnit || existingBatch?.sellingPriceUnit || 0,
         );
@@ -320,15 +337,16 @@ export class OcrAiService {
         unitPrice = Math.round(finalSellingPrice / units);
       }
 
-      // 3. Shelf Location: autofill from existing inventory
-      const shelfLocation = existingItem?.shelfLocation ? String(existingItem.shelfLocation).trim() : '';
+      // 3. Shelf Location: autofill from existing inventory ONLY if not skipMatching
+      if (!skipMatching && existingItem?.shelfLocation) {
+        shelfLocation = String(existingItem.shelfLocation).trim();
+      }
 
-      // 4. Expiry Date: strictly NEVER inherit expiry from previous batches (clinical patient safety)
       if (!expiryDate) {
         discrepancies.push('⚠️ الصلاحية غير محددة في الفاتورة - يرجى إدخال تاريخ الصلاحية يدوياً من العبوة لضمان سلامة المرضى');
       }
 
-      if (existingItem) {
+      if (!skipMatching && existingItem) {
         const prefilledNotes: string[] = [];
         if (finalSellingPrice > 0) prefilledNotes.push(`السعر: ${finalSellingPrice.toLocaleString()} د.ع`);
         if (shelfLocation) prefilledNotes.push(`الرف: ${shelfLocation}`);
@@ -342,19 +360,15 @@ export class OcrAiService {
         discrepanciesCount += discrepancies.length;
       }
 
-      const cleanMatchedName = matchResult.medicine?.tradeName
-        ? cleanTradeNameWithStrength(matchResult.medicine.tradeName, cleanStrength).cleanName
-        : cleanName;
-
       matchedItems.push({
         rawName,
-        matchedMedicineId: matchResult.medicine?.id || null,
-        matchedTradeName: cleanMatchedName || cleanName,
-        scientificName: matchResult.scientificName || item.scientificName || '',
-        strength: cleanStrength || matchResult.medicine?.strength || '',
-        dosageForm: item.dosageForm || matchResult.medicine?.dosageForm || '',
-        manufacturer: item.manufacturer || matchResult.medicine?.manufacturer || '',
-        barcode: matchResult.barcode || item.barcode || '',
+        matchedMedicineId,
+        matchedTradeName: matchedTradeName || rawName,
+        scientificName: scientificName || item.scientificName || '',
+        strength: item.strength || '',
+        dosageForm: item.dosageForm || '',
+        manufacturer: item.manufacturer || '',
+        barcode: barcode || '',
         batchNumber,
         expiryDate,
         quantityPacks,
@@ -367,7 +381,7 @@ export class OcrAiService {
         sellingPriceUnit: unitPrice,
         shelfLocation,
         totalCost: quantityPacks * (purchasePrice * (1 - discountPercent / 100)),
-        confidence: matchResult.confidence,
+        confidence: matchConfidence as any,
         discrepancies,
       });
     }

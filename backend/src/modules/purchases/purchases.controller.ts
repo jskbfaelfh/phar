@@ -99,7 +99,7 @@ export class PurchasesController {
   @Post('ai-scan-invoice')
   async aiScanInvoice(
     @Request() req: any,
-    @Body() body: { imageBase64?: string; storageKey?: string; rawTextHint?: string },
+    @Body() body: { imageBase64?: string; storageKey?: string; rawTextHint?: string; skipMatching?: boolean },
   ) {
     const userId = req.user.id || req.user.sub || req.user.username;
     const userName = req.user.name || req.user.username;
@@ -170,7 +170,11 @@ export class PurchasesController {
       throw new BadRequestException('يرجى تقديم صورة الفاتورة عبر storageKey أو imageBase64');
     }
 
-    const result = await this.ocrAiService.processInvoiceImage(req.user.tenantId, base64!);
+    const result = await this.ocrAiService.processInvoiceImage(
+      req.user.tenantId,
+      base64!,
+      body.skipMatching === true,
+    );
     return {
       ...result,
       storageKey: storageKey || null,
