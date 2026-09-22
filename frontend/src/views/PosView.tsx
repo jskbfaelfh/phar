@@ -1118,33 +1118,7 @@ export const PosView: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs w-full max-w-full">
         <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
           <h1 className="text-lg sm:text-xl font-black text-slate-900 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={togglePricingMode}
-              className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-xs ${
-                showActualPrices
-                  ? 'bg-amber-500 text-white shadow-amber-900/30 ring-2 ring-amber-400 animate-pulse'
-                  : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-              }`}
-              title={
-                showActualPrices
-                  ? 'إخفاء أسعار الصيدلية الفعلية والعودة للتسعيرة الرسمية'
-                  : 'إظهار أسعار الصيدلية الفعلية الخفية'
-              }
-            >
-              <ShoppingCart className="w-5 h-5" />
-            </button>
             <span>الكاشير</span>
-            {showActualPrices ? (
-              <span className="px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-black flex items-center gap-1.5 animate-in fade-in">
-                <Eye className="w-3.5 h-3.5 text-amber-700" />
-                <span>أسعار الصيدلية الفعلية (مكشوفة)</span>
-              </span>
-            ) : (
-              <span className="px-2.5 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-xl text-xs font-black flex items-center gap-1.5">
-                <span>التسعيرة الرسمية (ظاهرة)</span>
-              </span>
-            )}
           </h1>
 
           {/* Offline / Online Connectivity Indicator */}
@@ -1494,12 +1468,44 @@ export const PosView: React.FC = () => {
         <div className="lg:col-span-5 flex flex-col bg-white rounded-2xl border-2 border-slate-200 shadow-md overflow-hidden">
           {/* Cart Header */}
           <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-            <h2 className="font-black text-slate-900 flex items-center gap-2.5 text-base sm:text-lg">
-              <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={togglePricingMode}
+                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-90 shadow-xs ${
+                  showActualPrices
+                    ? 'bg-amber-500 text-white shadow-amber-900/30 ring-2 ring-amber-400 animate-pulse'
+                    : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 hover:scale-105'
+                }`}
+                title={
+                  showActualPrices
+                    ? 'الأسعار الحالية: سعر الصيدلية الفعلي. انقر للعودة للتسعيرة الرسمية'
+                    : 'الأسعار الحالية: التسعيرة الرسمية. انقر للتبديل إلى أسعار الصيدلية الفعلية'
+                }
+              >
                 <ShoppingCart className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-2">
+                <h2 className="font-black text-slate-900 text-base sm:text-lg">السلة</h2>
+                <button
+                  type="button"
+                  onClick={togglePricingMode}
+                  className="cursor-pointer transition-all active:scale-95"
+                  title="انقر للتبديل بين التسعيرة الرسمية وسعر الصيدلية الفعلي"
+                >
+                  {showActualPrices ? (
+                    <span className="px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-xs font-black flex items-center gap-1 hover:bg-amber-200 transition-colors shadow-2xs">
+                      <Eye className="w-3 h-3 text-amber-700" />
+                      <span>فعلي</span>
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 bg-slate-100 text-slate-600 border border-slate-200 rounded-lg text-xs font-black flex items-center gap-1 hover:bg-slate-200 transition-colors shadow-2xs">
+                      <span>رسمي</span>
+                    </span>
+                  )}
+                </button>
               </div>
-              <span>السلة</span>
-            </h2>
+            </div>
             <span className="text-sm font-black px-3.5 py-1 bg-slate-200 text-slate-800 rounded-full font-mono">
               {cart.length} مواد
             </span>
