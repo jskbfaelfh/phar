@@ -1546,11 +1546,13 @@ export const PosView: React.FC = () => {
 
           {/* Cart Footer & Checkout */}
           <div className="p-3.5 sm:p-4 border-t-2 border-slate-200 bg-slate-50/90 space-y-3 shrink-0">
-            {/* Subtotal */}
-            <div className="flex justify-between items-center text-sm sm:text-base font-black text-slate-700">
-              <span>المجموع قبل الخصم:</span>
-              <span className="text-base sm:text-lg font-black font-mono text-slate-900">{subtotal.toLocaleString()} د.ع</span>
-            </div>
+            {/* Subtotal - Only visible when discount option is active */}
+            {(showDiscountInput || discountAmount > 0 || discountPercent !== '') && (
+              <div className="flex justify-between items-center text-sm sm:text-base font-black text-slate-700 animate-in fade-in duration-150">
+                <span>المجموع قبل الخصم:</span>
+                <span className="text-base sm:text-lg font-black font-mono text-slate-900">{subtotal.toLocaleString()} د.ع</span>
+              </div>
+            )}
 
             {/* Discount (Small toggle when inactive, expanded when active) */}
             {!showDiscountInput && discountAmount === 0 && discountPercent === '' ? (
