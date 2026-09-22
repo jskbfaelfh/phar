@@ -32,7 +32,6 @@ import {
   ChevronDown,
   ChevronUp,
   Camera,
-  Eye,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250, calculateStripPrice } from '../utils/currency';
