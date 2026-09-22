@@ -17,6 +17,9 @@ import {
   Tag,
   BadgePercent,
   Camera,
+  FileSpreadsheet,
+  X,
+  Upload,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250, calculateStripPrice } from '../utils/currency';
@@ -88,6 +91,12 @@ export const BulkStockEntryView: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Excel/CSV Import Modal
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importError, setImportError] = useState('');
+  const importFileRef = useRef<HTMLInputElement>(null);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // New Medicine Modal State
@@ -125,6 +134,132 @@ export const BulkStockEntryView: React.FC = () => {
   useEffect(() => {
     fetchSuppliers();
   }, []);
+
+  // ─── Excel / CSV Import ───────────────────────────────────────────────────
+  /**
+   * Expected columns (tab or comma separated, first row = header ignored):
+   * الباركود | اسم المادة | الكمية | سعر الشراء | الخصم% | (optional more cols)
+   * OR positional: col0=barcode, col1=name, col2=qty, col3=purchasePrice, col4=discount
+   * Also handles Excel paste (tab-separated).
+   */
+  const parseAndImportExcel = (rawText: string) => {
+    setImportError('');
+    const lines = rawText.trim().split('\n').filter((l) => l.trim());
+    if (lines.length === 0) {
+      setImportError('الملف فارغ أو لا يحتوي على بيانات.');
+      return;
+    }
+
+    const currentYear = new Date().getFullYear();
+    const newRows: TableRowItem[] = [];
+    let skipped = 0;
+
+    // Detect separator
+    const sep = lines[0].includes('\t') ? '\t' : ',';
+
+    // Skip header row if first cell looks like a label (not a number/barcode)
+    let startIdx = 0;
+    const firstCells = lines[0].split(sep);
+    const firstCell = firstCells[0].trim().replace(/"/g, '');
+    if (isNaN(Number(firstCell)) && firstCell.length > 0 && !/^\d{5,}$/.test(firstCell)) {
+      startIdx = 1; // skip header
+    }
+
+    for (let i = startIdx; i < lines.length; i++) {
+      const cells = lines[i].split(sep).map((c) => c.trim().replace(/"/g, '').replace(/,/g, ''));
+      if (cells.length < 2) { skipped++; continue; }
+
+      // Try to detect column order automatically
+      // Common format from Mashariq invoices: رقم | باركود | المادة | العدد | السعر | الخصم | المجموع
+      // OR: باركود | المادة | العدد | السعر | الخصم | المجموع
+      let barcode = '';
+      let name = '';
+      let qty = 1;
+      let purchasePrice = 0;
+      let discount = 0;
+
+      if (cells.length >= 6) {
+        // Detect if first column is a row number (short number ≤4 digits)
+        const c0 = cells[0].replace(/\D/g, '');
+        const isRowNum = c0.length <= 4 && Number(c0) > 0 && Number(c0) < 1000;
+        if (isRowNum) {
+          // Format: # | barcode | name | qty | price | discount | total
+          barcode = cells[1].replace(/\s/g, '');
+          name = cells[2];
+          qty = Math.max(1, Number(cells[3].replace(/\D/g, '')) || 1);
+          purchasePrice = Number(cells[4].replace(/[^\d.]/g, '')) || 0;
+          discount = Number(cells[5].replace(/[^\d.]/g, '')) || 0;
+        } else {
+          // Format: barcode | name | qty | price | discount | total
+          barcode = cells[0].replace(/\s/g, '');
+          name = cells[1];
+          qty = Math.max(1, Number(cells[2].replace(/\D/g, '')) || 1);
+          purchasePrice = Number(cells[3].replace(/[^\d.]/g, '')) || 0;
+          discount = Number(cells[4].replace(/[^\d.]/g, '')) || 0;
+        }
+      } else if (cells.length >= 4) {
+        barcode = cells[0].replace(/\s/g, '');
+        name = cells[1];
+        qty = Math.max(1, Number(cells[2].replace(/\D/g, '')) || 1);
+        purchasePrice = Number(cells[3].replace(/[^\d.]/g, '')) || 0;
+      } else if (cells.length >= 2) {
+        name = cells[0];
+        purchasePrice = Number(cells[1].replace(/[^\d.]/g, '')) || 0;
+      }
+
+      if (!name.trim() && !barcode) { skipped++; continue; }
+      if (purchasePrice === 0 && qty === 0) { skipped++; continue; }
+
+      // Default selling price = purchase price + 20% markup (user can edit)
+      const sellingPricePack = purchasePrice > 0 ? Math.round(purchasePrice * 1.2) : 0;
+
+      newRows.push({
+        tempId: `import-${Date.now()}-${i}`,
+        tradeName: name.trim() || 'بدون اسم',
+        scientificName: '',
+        barcode: barcode || undefined,
+        unitsPerPack: 1,
+        quantityPacks: qty,
+        bonusPacks: 0,
+        amortizeBonus: true,
+        discountPercent: discount,
+        purchasePricePack: purchasePrice,
+        sellingPricePack,
+        sellingPriceUnit: sellingPricePack,
+        expiryMonth: 12,
+        expiryYear: currentYear + 2,
+        isNewMedicine: true,
+      });
+    }
+
+    if (newRows.length === 0) {
+      setImportError(`تعذّر قراءة أي صنف. تأكد من الصيغة: باركود | الاسم | الكمية | السعر`);
+      return;
+    }
+
+    setItems((prev) => [...newRows, ...prev]);
+    setShowImportModal(false);
+    setImportText('');
+    setMessage({
+      type: 'success',
+      text: `✅ تم استيراد ${newRows.length} صنف${skipped > 0 ? ` (تم تخطي ${skipped} صفوف فارغة)` : ''}. راجع الأسعار وعدّل الصلاحية قبل الحفظ.`,
+    });
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      setImportText(text);
+    };
+    reader.readAsText(file, 'utf-8');
+    e.target.value = '';
+  };
+  // ─────────────────────────────────────────────────────────────────────────
+
+
 
   // Search medicines from catalog
   const handleSearch = async (term: string) => {
@@ -883,6 +1018,17 @@ export const BulkStockEntryView: React.FC = () => {
               أدوية الوجبة ({items.length})
             </h2>
 
+            {/* Excel Import Button */}
+            <button
+              type="button"
+              onClick={() => { setShowImportModal(true); setImportError(''); setImportText(''); }}
+              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors shadow-2xs"
+              title="استيراد أصناف من ملف Excel أو CSV أو نسخ-لصق"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              استيراد Excel
+            </button>
+
             {items.some((i) => Number(i.bonusPacks || 0) > 0) && (
               <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-xl text-[11px] font-bold">
                 <span className="text-amber-900">تطبيق البونص:</span>
@@ -1552,6 +1698,107 @@ export const BulkStockEntryView: React.FC = () => {
         }}
         title="مسح باركود الدواء لكشوفات الشحنة بكاميرا الجهاز"
       />
+
+      {/* ─── Excel / CSV Import Modal ─────────────────────────────────────── */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-200 flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                <h2 className="font-bold text-slate-900 text-base">استيراد أصناف من Excel / CSV</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowImportModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 flex flex-col gap-4 overflow-y-auto">
+              {/* Instructions */}
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3.5 text-xs text-blue-900 leading-relaxed">
+                <div className="font-bold text-sm mb-1.5">📋 طريقة الاستخدام:</div>
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>افتح الفاتورة في <strong>Excel</strong> أو <strong>Google Sheets</strong></li>
+                  <li>حدد جميع الصفوف والأعمدة → <strong>Ctrl+C</strong></li>
+                  <li>الصق في المربع أدناه → <strong>Ctrl+V</strong></li>
+                  <li>أو ارفع ملف <strong>.csv</strong> مباشرة</li>
+                </ol>
+                <div className="mt-2 pt-2 border-t border-blue-200">
+                  <span className="font-bold">الأعمدة المتوقعة:</span> رقم (اختياري) | الباركود | اسم المادة | الكمية | سعر الشراء | الخصم%
+                </div>
+              </div>
+
+              {/* File Upload */}
+              <div className="flex items-center gap-3">
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".csv,.txt"
+                  onChange={handleImportFile}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => importFileRef.current?.click()}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold inline-flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <Upload className="w-4 h-4" />
+                  رفع ملف CSV
+                </button>
+                <span className="text-xs text-slate-400">أو الصق البيانات مباشرة أدناه</span>
+              </div>
+
+              {/* Paste Area */}
+              <textarea
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                placeholder={`الصق هنا بيانات الفاتورة من Excel (Ctrl+V)...\n\nمثال:\n1\t8809517414315\tMedicube ZERO PORE PAD MILD 155g\t1\t19000\t0\t19000\n2\t8806407370190\tANUA Azelaic Acid Serum\t1\t20000\t0\t20000`}
+                rows={10}
+                dir="ltr"
+                className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono text-slate-800 focus:outline-none focus:border-emerald-500 focus:bg-white resize-y"
+              />
+
+              {importError && (
+                <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-800 font-bold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                  {importError}
+                </div>
+              )}
+
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-[11px] text-amber-800">
+                ⚠️ <strong>تنبيه:</strong> سعر البيع سيُحسب تلقائياً بـ <strong>+20% من سعر الشراء</strong>. راجع وعدّل الأسعار في الجدول بعد الاستيراد.
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-200 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowImportModal(false)}
+                className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-bold cursor-pointer hover:bg-slate-50"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => parseAndImportExcel(importText)}
+                disabled={!importText.trim()}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold cursor-pointer inline-flex items-center gap-2 transition-colors"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                استيراد ({importText.trim().split('\n').filter(l => l.trim()).length} سطر)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ──────────────────────────────────────────────────────────────────── */}
     </div>
   );
 };
