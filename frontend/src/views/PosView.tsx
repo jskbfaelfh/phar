@@ -1485,26 +1485,7 @@ export const PosView: React.FC = () => {
               >
                 <ShoppingCart className="w-5 h-5" />
               </button>
-              <div className="flex items-center gap-2">
-                <h2 className="font-black text-slate-900 text-base sm:text-lg">السلة</h2>
-                <button
-                  type="button"
-                  onClick={togglePricingMode}
-                  className="cursor-pointer transition-all active:scale-95"
-                  title="انقر للتبديل بين التسعيرة الرسمية وسعر الصيدلية الفعلي"
-                >
-                  {showActualPrices ? (
-                    <span className="px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-xs font-black flex items-center gap-1 hover:bg-amber-200 transition-colors shadow-2xs">
-                      <Eye className="w-3 h-3 text-amber-700" />
-                      <span>فعلي</span>
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 bg-slate-100 text-slate-600 border border-slate-200 rounded-lg text-xs font-black flex items-center gap-1 hover:bg-slate-200 transition-colors shadow-2xs">
-                      <span>رسمي</span>
-                    </span>
-                  )}
-                </button>
-              </div>
+              <h2 className="font-black text-slate-900 text-base sm:text-lg">السلة</h2>
             </div>
             <span className="text-sm font-black px-3.5 py-1 bg-slate-200 text-slate-800 rounded-full font-mono">
               {cart.length} مواد
