@@ -591,7 +591,7 @@ export class OcrAiService {
 
     // Use official active Google Gemini Vision models (starting with fast gemini-2.5-flash)
     const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro', 'gemini-pro-latest'];
-    let lastError = null;
+    let lastError: Error | null = null;
     let quotaExceeded = false;
 
     for (const model of models) {

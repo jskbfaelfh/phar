@@ -9,8 +9,6 @@ import {
   Sparkles,
   Layers,
   Save,
-  Gift,
-  Percent,
   Building2,
   CreditCard,
   Banknote,
@@ -50,11 +48,14 @@ interface TableRowItem {
   lastPurchasePricePack?: number;
   sellingPricePack: number;
   sellingPriceUnit: number;
+  officialPricePack?: number;
+  officialPriceUnit?: number;
   expiryMonth: number;
   expiryYear: number;
   batchNumber?: string;
   shelfLocation?: string;
   hasPreviousBatch?: boolean;
+  showExtraFields?: boolean;
 }
 
 export const BulkStockEntryView: React.FC = () => {
@@ -206,6 +207,8 @@ export const BulkStockEntryView: React.FC = () => {
       lastPurchasePricePack: lastPurchasePrice,
       sellingPricePack,
       sellingPriceUnit,
+      officialPricePack: Number(history?.officialPricePack || sellingPricePack),
+      officialPriceUnit: Number(history?.officialPriceUnit || sellingPriceUnit),
       expiryMonth,
       expiryYear,
       batchNumber: '',
@@ -434,6 +437,8 @@ export const BulkStockEntryView: React.FC = () => {
           purchasePricePack: Number(i.purchasePricePack),
           sellingPricePack: Number(i.sellingPricePack),
           sellingPriceUnit: Number(i.sellingPriceUnit),
+          officialPricePack: Number(i.officialPricePack !== undefined ? i.officialPricePack : i.sellingPricePack),
+          officialPriceUnit: Number(i.officialPriceUnit !== undefined ? i.officialPriceUnit : i.sellingPriceUnit),
           expiryMonth: Number(i.expiryMonth),
           expiryYear: Number(i.expiryYear),
           batchNumber: i.batchNumber || undefined,
@@ -913,33 +918,24 @@ export const BulkStockEntryView: React.FC = () => {
                 <th className="p-2.5 min-w-[180px]">الدواء</th>
                 <th className="p-2.5 min-w-[130px]">الباركود</th>
                 <th className="p-2.5 w-20 text-center">الكمية</th>
-                <th className="p-2.5 w-20 text-center bg-amber-50/70 text-amber-900">
-                  <span className="flex items-center justify-center gap-1">
-                    <Gift className="w-3 h-3 text-amber-600" />
-                    بونص
-                  </span>
-                </th>
                 <th className="p-2.5 w-20 text-center">الشريط/علبة</th>
                 <th className="p-2.5 w-28">شراء الباكيت</th>
-                <th className="p-2.5 w-20 text-center bg-rose-50/70 text-rose-900">
-                  <span className="flex items-center justify-center gap-1">
-                    <Percent className="w-3 h-3 text-rose-600" />
-                    خصم %
+                <th className="p-2.5 w-28 bg-amber-50/70 text-amber-900 border-b border-amber-200">
+                  <span className="flex items-center justify-center gap-1 font-black">
+                    🏛️ الرسمي
                   </span>
                 </th>
-                <th className="p-2.5 w-28 bg-indigo-50/50 text-indigo-900">الكلفة</th>
-                <th className="p-2.5 w-28">بيع الباكيت</th>
-                <th className="p-2.5 w-28">بيع الشريط</th>
+                <th className="p-2.5 w-28 font-black text-emerald-900 bg-emerald-50/70">بيع الفعلي (علبة)</th>
+                <th className="p-2.5 w-28 font-black text-blue-900 bg-blue-50/70">بيع الفعلي (شريط)</th>
                 <th className="p-2.5 w-32">الصلاحية</th>
                 <th className="p-2.5 w-24">الوجبة</th>
-                <th className="p-2.5 w-24">الرف</th>
-                <th className="p-2.5 w-10 text-center">حذف</th>
+                <th className="p-2.5 w-24 text-center">الإجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="p-10 text-center text-slate-400 font-bold">
+                  <td colSpan={12} className="p-10 text-center text-slate-400 font-bold">
                     <PackagePlus className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                     لا توجد أدوية بعد.
                   </td>
@@ -1167,13 +1163,28 @@ export const BulkStockEntryView: React.FC = () => {
                         )}
                       </td>
 
+                      {/* Official Price Pack (المعد للعرض بالكاشير) */}
+                      <td className="p-2 bg-amber-50/30">
+                        <input
+                          id={`input-official-pack-${idx}`}
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={row.officialPricePack ?? row.sellingPricePack}
+                          onChange={(e) => updateRowField(row.tempId, 'officialPricePack', Number(e.target.value))}
+                          onKeyDown={(e) => handleKeyDown(e, `input-selling-pack-${idx}`)}
+                          className="w-full px-2 py-1.5 bg-amber-50 border border-amber-300 text-amber-950 rounded-md font-bold text-left"
+                          placeholder="الرسمي"
+                        />
+                      </td>
+
                       {/* Selling Price Pack */}
                       <td className="p-2">
                         <input
                           id={`input-selling-pack-${idx}`}
                           type="number"
-                          min="250"
-                          step="250"
+                          min="0"
+                          step="1"
                           value={row.sellingPricePack}
                           onChange={(e) => updateRowField(row.tempId, 'sellingPricePack', Number(e.target.value))}
                           onKeyDown={(e) => handleKeyDown(e, `input-selling-unit-${idx}`)}
@@ -1186,8 +1197,8 @@ export const BulkStockEntryView: React.FC = () => {
                         <input
                           id={`input-selling-unit-${idx}`}
                           type="number"
-                          min="250"
-                          step="250"
+                          min="0"
+                          step="1"
                           value={row.sellingPriceUnit}
                           onChange={(e) => updateRowField(row.tempId, 'sellingPriceUnit', Number(e.target.value))}
                           onKeyDown={(e) => handleKeyDown(e, `input-exp-month-${idx}`)}
