@@ -922,12 +922,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                           <div className="space-y-0.5 font-mono">
                             <b className="text-slate-900 font-black text-xs block">
                               {Number(item.sellingPricePack || 0).toLocaleString()} د.ع{' '}
-                              <span className="text-[10px] text-slate-400 font-sans">/ علبة</span>
+                              <span className="text-[10px] text-slate-400 font-sans">/ علبة (فعلي)</span>
                             </b>
                             <span className="text-emerald-700 font-bold text-[11px] block">
                               {roundTo250(Number(item.sellingPriceUnit || 0)).toLocaleString()} د.ع{' '}
                               <span className="text-[10px] text-slate-400 font-sans">/ شريط</span>
                             </span>
+                            {Number(item.officialPricePack || 0) > 0 && Number(item.officialPricePack) !== Number(item.sellingPricePack) && (
+                              <span className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-bold block w-fit">
+                                🏛️ الرسمي: {Number(item.officialPricePack).toLocaleString()} د.ع
+                              </span>
+                            )}
                           </div>
                         </td>
 

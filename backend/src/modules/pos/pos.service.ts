@@ -181,7 +181,8 @@ export class PosService {
           async (tx) => {
             // A. Fetch and acquire exclusive row locks (FOR UPDATE) on inventory_items in deterministic order
             const itemRows: any[] = await tx.$queryRawUnsafe(
-              `SELECT id, medicine_id, units_per_pack, selling_price_pack, selling_price_unit 
+              `SELECT id, medicine_id, units_per_pack, selling_price_pack, selling_price_unit,
+                      official_price_pack, official_price_unit 
                FROM "${schemaName}".inventory_items 
                WHERE id = ANY($1::uuid[])
                ORDER BY id ASC
@@ -199,10 +200,10 @@ export class PosService {
               `SELECT id, inventory_item_id, batch_number, quantity_units_remaining, purchase_price_pack, selling_price_pack, selling_price_unit, expiry_date 
                FROM "${schemaName}".inventory_batches 
                WHERE inventory_item_id = ANY($1::uuid[]) 
-                 AND expiry_date >= CURRENT_DATE
-                 AND (is_recalled IS FALSE OR is_recalled IS NULL)
-               ORDER BY inventory_item_id ASC, expiry_date ASC, id ASC
-               FOR UPDATE`,
+                  AND expiry_date >= CURRENT_DATE
+                  AND (is_recalled IS FALSE OR is_recalled IS NULL)
+                ORDER BY inventory_item_id ASC, expiry_date ASC, id ASC
+                FOR UPDATE`,
               itemIds,
             );
 
@@ -233,8 +234,12 @@ export class PosService {
               const unitsToDeduct = isPack ? item.quantity * unitsPerPack : item.quantity;
               let unitsLeftToDeduct = unitsToDeduct;
 
-              const defaultPackPrice = Number(invItem.selling_price_pack) || 0;
-              const defaultUnitPrice = Number(invItem.selling_price_unit) || (unitsPerPack > 0 ? defaultPackPrice / unitsPerPack : 0);
+              const isOfficialPricing = dto.useOfficialPrices === true;
+              const officialPackPrice = Number(invItem.official_price_pack || invItem.selling_price_pack) || 0;
+              const officialUnitPrice = Number(invItem.official_price_unit || (unitsPerPack > 1 ? Math.round(officialPackPrice / unitsPerPack) : officialPackPrice)) || 0;
+
+              const defaultPackPrice = isOfficialPricing ? officialPackPrice : (Number(invItem.selling_price_pack) || 0);
+              const defaultUnitPrice = isOfficialPricing ? officialUnitPrice : (Number(invItem.selling_price_unit) || (unitsPerPack > 0 ? defaultPackPrice / unitsPerPack : 0));
 
               const availableBatches = batchesByItemMap.get(item.inventoryItemId) || [];
 
@@ -265,7 +270,11 @@ export class PosService {
                     const batchUnitPrice = targetBatch.selling_price_unit != null ? Number(targetBatch.selling_price_unit) : defaultUnitPrice;
 
                     const allocatedQty = isPack ? Math.round((unitsToTake / unitsPerPack) * 100) / 100 : unitsToTake;
-                    const priceApplied = isPack ? batchPackPrice : batchUnitPrice;
+                    const priceApplied = item.unitPrice !== undefined && Number(item.unitPrice) >= 0
+                      ? Number(item.unitPrice)
+                      : (alloc.unitPrice !== undefined && Number(alloc.unitPrice) >= 0
+                          ? Number(alloc.unitPrice)
+                          : (isOfficialPricing ? (isPack ? officialPackPrice : officialUnitPrice) : (isPack ? batchPackPrice : batchUnitPrice)));
                     const lineTotal = priceApplied * allocatedQty;
 
                     const costPricePack = Number(targetBatch.purchase_price_pack) || 0;
@@ -325,7 +334,9 @@ export class PosService {
                     const batchUnitPrice = batch.selling_price_unit != null ? Number(batch.selling_price_unit) : defaultUnitPrice;
 
                     const allocatedQty = isPack ? Math.round((deductionFromThisBatch / unitsPerPack) * 100) / 100 : deductionFromThisBatch;
-                    const priceApplied = isPack ? batchPackPrice : batchUnitPrice;
+                    const priceApplied = item.unitPrice !== undefined && Number(item.unitPrice) >= 0
+                      ? Number(item.unitPrice)
+                      : (isOfficialPricing ? (isPack ? officialPackPrice : officialUnitPrice) : (isPack ? batchPackPrice : batchUnitPrice));
                     const lineTotal = priceApplied * allocatedQty;
 
                     const costPricePack = Number(batch.purchase_price_pack) || 0;

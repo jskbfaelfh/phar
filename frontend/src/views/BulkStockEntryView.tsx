@@ -444,6 +444,15 @@ export const BulkStockEntryView: React.FC = () => {
           }
         }
 
+        // Auto-calculate official unit price when official pack price changes
+        if (field === 'officialPricePack' || field === 'unitsPerPack') {
+          const offPack = field === 'officialPricePack' ? Number(value) : Number(item.officialPricePack ?? item.sellingPricePack);
+          const units = field === 'unitsPerPack' ? Number(value) : Number(item.unitsPerPack);
+          if (units > 0 && offPack > 0) {
+            updated.officialPriceUnit = calculateStripPrice(offPack, units);
+          }
+        }
+
         return updated;
       }),
     );

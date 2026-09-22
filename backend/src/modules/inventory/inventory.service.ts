@@ -942,6 +942,8 @@ export class InventoryService {
            LIMIT 1), 
           i.selling_price_unit
         ) as "sellingPriceUnit",
+        COALESCE(i.official_price_pack, i.selling_price_pack, 0)::numeric as "officialPricePack",
+        COALESCE(i.official_price_unit, i.selling_price_unit, 0)::numeric as "officialPriceUnit",
         i.min_alert_units as "minAlertUnits",
         COALESCE(i.is_public_visible, TRUE) as "isPublicVisible",
         i.updated_at as "updatedAt",
@@ -1039,6 +1041,8 @@ export class InventoryService {
              ii.units_per_pack as "unitsPerPack",
              ii.selling_price_pack as "sellingPricePack",
              ii.selling_price_unit as "sellingPriceUnit",
+             COALESCE(ii.official_price_pack, ii.selling_price_pack)::numeric as "officialPricePack",
+             COALESCE(ii.official_price_unit, ii.selling_price_unit)::numeric as "officialPriceUnit",
              ii.shelf_location as "shelfLocation",
              m.barcode, m.trade_name as "masterTradeName"
       FROM "${schemaName}".inventory_items ii
@@ -1363,7 +1367,8 @@ export class InventoryService {
     const tenantId = this.tenantContext.getTenantId();
 
     const check: any[] = await this.prisma.$queryRawUnsafe(
-      `SELECT ii.medicine_id, ii.custom_name, ii.selling_price_pack, ii.selling_price_unit, ii.units_per_pack,
+      `SELECT ii.medicine_id, ii.custom_name, ii.selling_price_pack, ii.selling_price_unit,
+              ii.official_price_pack, ii.official_price_unit, ii.units_per_pack,
               m.trade_name
        FROM "${schemaName}".inventory_items ii
        LEFT JOIN public.medicines m ON ii.medicine_id = m.id
@@ -1393,8 +1398,8 @@ export class InventoryService {
       dto.customName !== undefined ? dto.customName : null,
       dto.sellingPricePack,
       dto.sellingPriceUnit,
-      dto.officialPricePack !== undefined ? dto.officialPricePack : (dto.sellingPricePack || null),
-      dto.officialPriceUnit !== undefined ? dto.officialPriceUnit : (dto.sellingPriceUnit || null),
+      dto.officialPricePack !== undefined ? dto.officialPricePack : (current.official_price_pack ?? dto.sellingPricePack ?? null),
+      dto.officialPriceUnit !== undefined ? dto.officialPriceUnit : (current.official_price_unit ?? dto.sellingPriceUnit ?? null),
       dto.minAlertUnits || null,
       dto.shelfLocation !== undefined ? dto.shelfLocation : null,
       inventoryItemId,

@@ -70,6 +70,8 @@ interface SearchMedicine {
   unitsPerPack: number;
   sellingPricePack: number;
   sellingPriceUnit: number;
+  officialPricePack?: number;
+  officialPriceUnit?: number;
   availablePacks: number;
   availableStrips: number;
   totalUnitsRemaining: number;
@@ -104,6 +106,10 @@ interface CartItem {
   activeBatches?: ActiveBatchInfo[];
   defaultSellingPricePack: number;
   defaultSellingPriceUnit: number;
+  officialPricePack?: number;
+  officialPriceUnit?: number;
+  actualPricePack?: number;
+  actualPriceUnit?: number;
   breakdown?: BatchPortion[];
 }
 
@@ -115,6 +121,7 @@ function calculateDynamicItemTotals(
   quantity: number,
   unitType: 'PACK' | 'STRIP',
   forcedBatchId?: string,
+  useOfficialPrice: boolean = false,
 ): { totalPrice: number; effectiveUnitPrice: number; breakdown: BatchPortion[] } {
   const isPack = unitType === 'PACK';
   const unitsPerPk = Number(unitsPerPack) || 1;
@@ -135,8 +142,10 @@ function calculateDynamicItemTotals(
       const availUnits = Number(batch.quantityUnitsRemaining) || 0;
       if (availUnits > 0) {
         const deductUnits = Math.min(availUnits, unitsLeft);
-        const packPrice = Number(batch.sellingPricePack) || defaultPackPrice;
-        const rawUnitPrice = Number(batch.sellingPriceUnit) || (unitsPerPk > 1 ? calculateStripPrice(packPrice, unitsPerPk) : defaultUnitPrice);
+        const packPrice = useOfficialPrice ? defaultPackPrice : (Number(batch.sellingPricePack) || defaultPackPrice);
+        const rawUnitPrice = useOfficialPrice
+          ? defaultUnitPrice
+          : (Number(batch.sellingPriceUnit) || (unitsPerPk > 1 ? calculateStripPrice(packPrice, unitsPerPk) : defaultUnitPrice));
         const unitPrice = roundTo250(rawUnitPrice);
         const pricePerUnit = isPack ? packPrice / unitsPerPk : unitPrice;
 
@@ -157,8 +166,10 @@ function calculateDynamicItemTotals(
 
     if (unitsLeft > 0) {
       const latest = sortedBatches[sortedBatches.length - 1];
-      const packPrice = Number(latest.sellingPricePack) || defaultPackPrice;
-      const rawUnitPrice = Number(latest.sellingPriceUnit) || (unitsPerPk > 1 ? calculateStripPrice(packPrice, unitsPerPk) : defaultUnitPrice);
+      const packPrice = useOfficialPrice ? defaultPackPrice : (Number(latest.sellingPricePack) || defaultPackPrice);
+      const rawUnitPrice = useOfficialPrice
+        ? defaultUnitPrice
+        : (Number(latest.sellingPriceUnit) || (unitsPerPk > 1 ? calculateStripPrice(packPrice, unitsPerPk) : defaultUnitPrice));
       const unitPrice = roundTo250(rawUnitPrice);
       const pricePerUnit = isPack ? packPrice / unitsPerPk : unitPrice;
       const lineCost = isPack ? Math.round(pricePerUnit * unitsLeft) : roundTo250(pricePerUnit * unitsLeft);
@@ -484,8 +495,14 @@ export const PosView: React.FC = () => {
   }, [searchTerm]);
 
   const addToCart = (med: SearchMedicine, unitType: 'PACK' | 'STRIP', specificBatch?: ActiveBatchInfo) => {
-    let packPrice = Number(med.sellingPricePack) || 0;
-    let unitPrice = roundTo250(Number(med.sellingPriceUnit) || (med.unitsPerPack > 1 ? calculateStripPrice(packPrice, med.unitsPerPack) : packPrice));
+    const isOfficial = !showActualPrices;
+    const actualPack = Number(med.sellingPricePack) || 0;
+    const actualUnit = roundTo250(Number(med.sellingPriceUnit) || (med.unitsPerPack > 1 ? calculateStripPrice(actualPack, med.unitsPerPack) : actualPack));
+    const officialPack = Number(med.officialPricePack) || actualPack;
+    const officialUnit = roundTo250(Number(med.officialPriceUnit) || (med.unitsPerPack > 1 ? calculateStripPrice(officialPack, med.unitsPerPack) : officialPack));
+
+    let packPrice = isOfficial ? officialPack : actualPack;
+    let unitPrice = isOfficial ? officialUnit : actualUnit;
 
     // If medicine from Master Catalog has no price set yet, prompt cashier
     if (packPrice === 0 && unitPrice === 0) {
@@ -532,14 +549,22 @@ export const PosView: React.FC = () => {
           return prev;
         }
 
+        const effectivePack = isOfficial
+          ? (current.officialPricePack || current.defaultSellingPricePack)
+          : (current.actualPricePack || current.defaultSellingPricePack);
+        const effectiveUnit = isOfficial
+          ? (current.officialPriceUnit || current.defaultSellingPriceUnit)
+          : (current.actualPriceUnit || current.defaultSellingPriceUnit);
+
         const { totalPrice, effectiveUnitPrice, breakdown } = calculateDynamicItemTotals(
           current.activeBatches,
-          current.defaultSellingPricePack,
-          current.defaultSellingPriceUnit,
+          effectivePack,
+          effectiveUnit,
           current.unitsPerPack,
           newQty,
           unitType,
           current.inventoryBatchId,
+          isOfficial,
         );
 
         const updated = [...prev];
@@ -561,6 +586,7 @@ export const PosView: React.FC = () => {
         1,
         unitType,
         batchId,
+        isOfficial,
       );
 
       return [
@@ -579,8 +605,12 @@ export const PosView: React.FC = () => {
           totalPrice,
           unitsPerPack: med.unitsPerPack,
           activeBatches: med.activeBatches,
-          defaultSellingPricePack: Number(med.sellingPricePack),
-          defaultSellingPriceUnit: roundTo250(Number(med.sellingPriceUnit) || (med.unitsPerPack > 1 ? calculateStripPrice(Number(med.sellingPricePack), med.unitsPerPack) : Number(med.sellingPricePack))),
+          defaultSellingPricePack: actualPack,
+          defaultSellingPriceUnit: actualUnit,
+          officialPricePack: officialPack,
+          officialPriceUnit: officialUnit,
+          actualPricePack: actualPack,
+          actualPriceUnit: actualUnit,
           breakdown,
         },
       ];
@@ -611,14 +641,23 @@ export const PosView: React.FC = () => {
         }
       }
 
+      const isOfficial = !showActualPrices;
+      const effectivePack = isOfficial
+        ? (item.officialPricePack || item.defaultSellingPricePack)
+        : (item.actualPricePack || item.defaultSellingPricePack);
+      const effectiveUnit = isOfficial
+        ? (item.officialPriceUnit || item.defaultSellingPriceUnit)
+        : (item.actualPriceUnit || item.defaultSellingPriceUnit);
+
       const { totalPrice, effectiveUnitPrice, breakdown } = calculateDynamicItemTotals(
         item.activeBatches,
-        item.defaultSellingPricePack,
-        item.defaultSellingPriceUnit,
+        effectivePack,
+        effectiveUnit,
         item.unitsPerPack,
         newQty,
         item.unitType,
         item.inventoryBatchId,
+        isOfficial,
       );
 
       const updated = [...prev];
@@ -630,6 +669,44 @@ export const PosView: React.FC = () => {
         breakdown,
       };
       return updated;
+    });
+  };
+
+  const togglePricingMode = () => {
+    setShowActualPrices((prevMode) => {
+      const nextMode = !prevMode;
+      const isOfficial = !nextMode;
+
+      setCart((prevCart) =>
+        prevCart.map((item) => {
+          const effectivePack = isOfficial
+            ? (item.officialPricePack || item.defaultSellingPricePack)
+            : (item.actualPricePack || item.defaultSellingPricePack);
+          const effectiveUnit = isOfficial
+            ? (item.officialPriceUnit || item.defaultSellingPriceUnit)
+            : (item.actualPriceUnit || item.defaultSellingPriceUnit);
+
+          const { totalPrice, effectiveUnitPrice, breakdown } = calculateDynamicItemTotals(
+            item.activeBatches,
+            effectivePack,
+            effectiveUnit,
+            item.unitsPerPack,
+            item.quantity,
+            item.unitType,
+            item.inventoryBatchId,
+            isOfficial,
+          );
+
+          return {
+            ...item,
+            unitPrice: effectiveUnitPrice,
+            totalPrice,
+            breakdown,
+          };
+        }),
+      );
+
+      return nextMode;
     });
   };
 
@@ -656,11 +733,13 @@ export const PosView: React.FC = () => {
     const payload = {
       discountAmount: Number(discountAmount || 0),
       customerName: customerName.trim() || undefined,
+      useOfficialPrices: !showActualPrices,
       items: cart.map((item) => ({
         inventoryItemId: item.inventoryItemId,
         inventoryBatchId: item.inventoryBatchId,
         unitType: item.unitType,
         quantity: item.quantity,
+        unitPrice: item.unitPrice,
       })),
     };
 
@@ -1041,7 +1120,7 @@ export const PosView: React.FC = () => {
           <h1 className="text-lg sm:text-xl font-black text-slate-900 flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setShowActualPrices((prev) => !prev)}
+              onClick={togglePricingMode}
               className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-xs ${
                 showActualPrices
                   ? 'bg-amber-500 text-white shadow-amber-900/30 ring-2 ring-amber-400 animate-pulse'
@@ -1335,6 +1414,19 @@ export const PosView: React.FC = () => {
                           {med.strength && <span className="mx-1.5 text-slate-700 font-bold">• {med.strength}</span>}
                           {med.dosageForm && <span className="text-slate-500">({med.dosageForm})</span>}
                         </div>
+                        {Number(med.officialPricePack || 0) > 0 && Number(med.officialPricePack) !== Number(med.sellingPricePack) && (
+                          <div className="mt-1 text-[11px] font-bold">
+                            {showActualPrices ? (
+                              <span className="text-slate-500">
+                                🏛️ الرسمي: <span className="font-mono line-through">{Number(med.officialPricePack).toLocaleString()} د.ع</span>
+                              </span>
+                            ) : (
+                              <span className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                                💡 الفعلي المخفض: <span className="font-mono">{Number(med.sellingPricePack).toLocaleString()} د.ع</span> (اكشفه بزر الكاشير بالأعلى)
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
@@ -1348,7 +1440,7 @@ export const PosView: React.FC = () => {
                           <span className="font-mono font-bold bg-emerald-700/50 px-2 py-0.5 rounded-lg text-emerald-100">
                             {(showActualPrices
                               ? Number(med.sellingPricePack)
-                              : (Number((med as any).officialPricePack) || Number(med.sellingPricePack))
+                              : (Number(med.officialPricePack) || Number(med.sellingPricePack))
                             ).toLocaleString()} د.ع
                           </span>
                         </button>
@@ -1364,7 +1456,7 @@ export const PosView: React.FC = () => {
                             <span className="font-mono font-bold bg-blue-700/50 px-2 py-0.5 rounded-lg text-blue-100">
                               {(showActualPrices
                                 ? roundTo250(Number(med.sellingPriceUnit) || calculateStripPrice(Number(med.sellingPricePack), med.unitsPerPack))
-                                : (Number((med as any).officialPriceUnit) || roundTo250(Number(med.sellingPriceUnit) || calculateStripPrice(Number(med.sellingPricePack), med.unitsPerPack)))
+                                : (Number(med.officialPriceUnit) || (Number(med.officialPricePack) && med.unitsPerPack > 1 ? calculateStripPrice(Number(med.officialPricePack), med.unitsPerPack) : roundTo250(Number(med.sellingPriceUnit) || calculateStripPrice(Number(med.sellingPricePack), med.unitsPerPack))))
                               ).toLocaleString()} د.ع
                             </span>
                           </button>
@@ -1458,7 +1550,18 @@ export const PosView: React.FC = () => {
                           ))}
                         </div>
                       ) : (
-                        <span className="font-mono font-bold text-slate-700">{roundTo250(item.unitPrice).toLocaleString()} د.ع</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono font-bold text-slate-700">{roundTo250(item.unitPrice).toLocaleString()} د.ع</span>
+                          {showActualPrices ? (
+                            <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded font-bold border border-amber-200">
+                              فعلي
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded font-bold border border-slate-200">
+                              رسمي
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>

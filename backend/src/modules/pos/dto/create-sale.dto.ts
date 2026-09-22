@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsNotEmpty,
   IsNumber,
@@ -36,6 +37,11 @@ export class CartItemDto {
   @Min(0.01, { message: 'الكمية يجب أن تكون أكبر من صفر' })
   @Max(10000, { message: 'الكمية لا يمكن أن تتجاوز 10,000 في العملية الواحدة' })
   quantity: number;
+
+  @IsNumber({}, { message: 'سعر الوحدة يجب أن يكون رقماً صالحاً' })
+  @IsOptional()
+  @Min(0)
+  unitPrice?: number;
 }
 
 export class OfflineBatchAllocationDto {
@@ -78,6 +84,10 @@ export class CheckoutDto {
   @IsOptional()
   @Min(0)
   discountAmount?: number = 0; // خصم مبلغ مباشر (IQD)
+
+  @IsBoolean()
+  @IsOptional()
+  useOfficialPrices?: boolean; // اعتماد التسعيرة الرسمية النقابية للفاتورة
 
   @IsString()
   @IsOptional()
