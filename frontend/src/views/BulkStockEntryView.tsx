@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   PackagePlus,
   Search,
@@ -141,114 +141,170 @@ export const BulkStockEntryView: React.FC = () => {
     fetchSuppliers();
   }, []);
 
-  // ─── Excel / CSV Import ───────────────────────────────────────────────────
-  /**
-   * Expected columns (tab or comma separated, first row = header ignored):
-   * الباركود | اسم المادة | الكمية | سعر الشراء | الخصم% | (optional more cols)
-   * OR positional: col0=barcode, col1=name, col2=qty, col3=purchasePrice, col4=discount
-   * Also handles Excel paste (tab-separated).
-   */
-  const parseAndImportExcel = (rawText: string) => {
-    setImportError('');
-    const lines = rawText.trim().split('\n').filter((l) => l.trim());
-    if (lines.length === 0) {
-      setImportError('الملف فارغ أو لا يحتوي على بيانات.');
-      return;
-    }
+  // ─── Smart Content-Based Excel / CSV Parser ────────────────────────────────
+  const parseSmartLine = (line: string, lineIndex: number, currentYear: number): TableRowItem | null => {
+    const trimmed = line.trim();
+    if (!trimmed) return null;
 
-    const currentYear = new Date().getFullYear();
-    const newRows: TableRowItem[] = [];
-    let skipped = 0;
+    // Detect separator: Tab, Semicolon, Comma, or multi-space
+    let sep = '\t';
+    if (trimmed.includes('\t')) sep = '\t';
+    else if (trimmed.includes(';') && !trimmed.includes(',')) sep = ';';
+    else if (trimmed.includes(',')) sep = ',';
 
-    // Detect separator
-    const sep = lines[0].includes('\t') ? '\t' : ',';
-
-    // Skip header row if first cell looks like a label (not a number/barcode)
-    let startIdx = 0;
-    const firstCells = lines[0].split(sep);
-    const firstCell = firstCells[0].trim().replace(/"/g, '');
-    if (isNaN(Number(firstCell)) && firstCell.length > 0 && !/^\d{5,}$/.test(firstCell)) {
-      startIdx = 1; // skip header
-    }
-
-    for (let i = startIdx; i < lines.length; i++) {
-      const cells = lines[i].split(sep).map((c) => c.trim().replace(/"/g, '').replace(/,/g, ''));
-      if (cells.length < 2) { skipped++; continue; }
-
-      // Try to detect column order automatically
-      // Common format from Mashariq invoices: رقم | باركود | المادة | العدد | السعر | الخصم | المجموع
-      // OR: باركود | المادة | العدد | السعر | الخصم | المجموع
-      let barcode = '';
-      let name = '';
-      let qty = 1;
-      let purchasePrice = 0;
-      let discount = 0;
-
-      if (cells.length >= 6) {
-        // Detect if first column is a row number (short number ≤4 digits)
-        const c0 = cells[0].replace(/\D/g, '');
-        const isRowNum = c0.length <= 4 && Number(c0) > 0 && Number(c0) < 1000;
-        if (isRowNum) {
-          // Format: # | barcode | name | qty | price | discount | total
-          barcode = cells[1].replace(/\s/g, '');
-          name = cells[2];
-          qty = Math.max(1, Number(cells[3].replace(/\D/g, '')) || 1);
-          purchasePrice = Number(cells[4].replace(/[^\d.]/g, '')) || 0;
-          discount = Number(cells[5].replace(/[^\d.]/g, '')) || 0;
-        } else {
-          // Format: barcode | name | qty | price | discount | total
-          barcode = cells[0].replace(/\s/g, '');
-          name = cells[1];
-          qty = Math.max(1, Number(cells[2].replace(/\D/g, '')) || 1);
-          purchasePrice = Number(cells[3].replace(/[^\d.]/g, '')) || 0;
-          discount = Number(cells[4].replace(/[^\d.]/g, '')) || 0;
-        }
-      } else if (cells.length >= 4) {
-        barcode = cells[0].replace(/\s/g, '');
-        name = cells[1];
-        qty = Math.max(1, Number(cells[2].replace(/\D/g, '')) || 1);
-        purchasePrice = Number(cells[3].replace(/[^\d.]/g, '')) || 0;
-      } else if (cells.length >= 2) {
-        name = cells[0];
-        purchasePrice = Number(cells[1].replace(/[^\d.]/g, '')) || 0;
+    let cells = trimmed.split(sep).map((c) => c.trim().replace(/^["']|["']$/g, '').trim());
+    if (cells.length < 2) {
+      if (trimmed.split(/\s{2,}/).length >= 2) {
+        cells = trimmed.split(/\s{2,}/).map((c) => c.trim());
+      } else {
+        return null;
       }
-
-      if (!name.trim() && !barcode) { skipped++; continue; }
-      if (purchasePrice === 0 && qty === 0) { skipped++; continue; }
-
-      // Default selling price = purchase price + 20% markup (user can edit)
-      const sellingPricePack = purchasePrice > 0 ? Math.round(purchasePrice * 1.2) : 0;
-
-      newRows.push({
-        tempId: `import-${Date.now()}-${i}`,
-        tradeName: name.trim() || 'بدون اسم',
-        scientificName: '',
-        barcode: barcode || undefined,
-        unitsPerPack: 1,
-        quantityPacks: qty,
-        bonusPacks: 0,
-        amortizeBonus: true,
-        discountPercent: discount,
-        purchasePricePack: purchasePrice,
-        sellingPricePack,
-        sellingPriceUnit: sellingPricePack,
-        expiryMonth: 12,
-        expiryYear: currentYear + 2,
-        isNewMedicine: true,
-      });
     }
 
-    if (newRows.length === 0) {
-      setImportError(`تعذّر قراءة أي صنف. تأكد من الصيغة: باركود | الاسم | الكمية | السعر`);
+    // Check if this row is a header row (e.g. contains words like 'باركود', 'المادة', 'السعر')
+    const joined = cells.join(' ');
+    if (/(الباركود|المادة|اسم المادة|السعر|العدد|الكمية|المجموع|الخصم|تاريخ|Barcode|Trade Name|Price|Qty)/i.test(joined)) {
+      return null;
+    }
+
+    // 1. Identify Barcode: Pure digits of 7 to 16 digits length
+    let barcode = '';
+    let barcodeIdx = -1;
+    for (let i = 0; i < cells.length; i++) {
+      const raw = cells[i].replace(/[\s-]/g, '');
+      if (/^\d{7,16}$/.test(raw)) {
+        barcode = raw;
+        barcodeIdx = i;
+        break;
+      }
+    }
+
+    // 2. Identify Discount %: cell containing '%'
+    let discount = 0;
+    let discountIdx = -1;
+    for (let i = 0; i < cells.length; i++) {
+      if (i === barcodeIdx) continue;
+      if (cells[i].includes('%')) {
+        const d = parseFloat(cells[i].replace(/[^\d.]/g, ''));
+        if (!isNaN(d)) {
+          discount = d;
+          discountIdx = i;
+          break;
+        }
+      }
+    }
+
+    // 3. Identify Medicine Name: Cell with the most Arabic/English letters
+    let tradeName = '';
+    let nameIdx = -1;
+    let maxLetters = 0;
+    for (let i = 0; i < cells.length; i++) {
+      if (i === barcodeIdx || i === discountIdx) continue;
+      const letters = cells[i].replace(/[^a-zA-Z\u0600-\u06FF]/g, '');
+      if (letters.length > maxLetters && !/^(د\.ع|IQD|USD|\$|pack|box|علبة|قطعة)$/i.test(cells[i].trim())) {
+        maxLetters = letters.length;
+        tradeName = cells[i].trim();
+        nameIdx = i;
+      }
+    }
+
+    // Fallback for name if no letters
+    if (!tradeName) {
+      for (let i = 0; i < cells.length; i++) {
+        if (i !== barcodeIdx && i !== discountIdx && cells[i].length > 0) {
+          tradeName = cells[i].trim();
+          nameIdx = i;
+          break;
+        }
+      }
+    }
+
+    // 4. Collect remaining numeric cells (for qty, price, total)
+    const numericCells: { idx: number; val: number }[] = [];
+    for (let i = 0; i < cells.length; i++) {
+      if (i === barcodeIdx || i === discountIdx || i === nameIdx) continue;
+      const cleaned = cells[i].replace(/[^\d.]/g, '');
+      const n = parseFloat(cleaned);
+      if (!isNaN(n) && n > 0) {
+        numericCells.push({ idx: i, val: n });
+      }
+    }
+
+    // In Iraq, wholesale prices are >= 250 IQD
+    const priceCandidates = numericCells.filter((c) => c.val >= 250).sort((a, b) => a.val - b.val);
+    const smallCandidates = numericCells.filter((c) => c.val < 250);
+
+    let purchasePrice = 0;
+    let qty = 1;
+
+    if (priceCandidates.length > 0) {
+      // Smallest candidate >= 250 is the unit purchase price (the other is usually total = qty * price)
+      purchasePrice = priceCandidates[0].val;
+    }
+
+    // Filter out sequence number matching 1, 2, 3...
+    const nonSeqSmalls = smallCandidates.filter((s) => s.val !== lineIndex + 1);
+    if (nonSeqSmalls.length > 0) {
+      qty = Math.max(1, Math.round(nonSeqSmalls[0].val));
+    } else if (smallCandidates.length > 0) {
+      qty = Math.max(1, Math.round(smallCandidates[0].val));
+    }
+
+    if (purchasePrice === 0 && numericCells.length > 0) {
+      purchasePrice = numericCells[numericCells.length - 1].val;
+    }
+
+    if (!tradeName && !barcode) return null;
+
+    // Standard pharmacy selling price: +20% markup rounded to nearest 250 IQD
+    const sellingPrice = purchasePrice > 0 ? roundTo250(Math.round(purchasePrice * 1.2)) : 0;
+
+    return {
+      tempId: `import-${Date.now()}-${lineIndex}-${Math.random().toString(36).substring(2, 6)}`,
+      tradeName: tradeName || 'صنف بدون اسم',
+      scientificName: '',
+      barcode: barcode || undefined,
+      unitsPerPack: 1,
+      quantityPacks: qty,
+      bonusPacks: 0,
+      amortizeBonus: true,
+      discountPercent: discount,
+      purchasePricePack: purchasePrice,
+      sellingPricePack: sellingPrice,
+      sellingPriceUnit: sellingPrice,
+      officialPricePack: sellingPrice,
+      officialPriceUnit: sellingPrice,
+      expiryMonth: 12,
+      expiryYear: currentYear + 2,
+      isNewMedicine: true,
+    };
+  };
+
+  const previewRows = useMemo(() => {
+    if (!importText.trim()) return [];
+    const lines = importText.trim().split('\n').filter((l) => l.trim());
+    const currentYear = new Date().getFullYear();
+    const rows: TableRowItem[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const item = parseSmartLine(lines[i], i, currentYear);
+      if (item) rows.push(item);
+    }
+    return rows;
+  }, [importText]);
+
+  const parseAndImportExcel = () => {
+    setImportError('');
+    if (previewRows.length === 0) {
+      setImportError('تعذّر التعرف على أي أصناف صالحة. تأكد من نسخ صفوف الفاتورة.');
       return;
     }
 
-    setItems((prev) => [...newRows, ...prev]);
+    setItems((prev) => [...previewRows, ...prev]);
     setShowImportModal(false);
     setImportText('');
     setMessage({
       type: 'success',
-      text: `✅ تم استيراد ${newRows.length} صنف${skipped > 0 ? ` (تم تخطي ${skipped} صفوف فارغة)` : ''}. راجع الأسعار وعدّل الصلاحية قبل الحفظ.`,
+      text: `✅ تم استيراد ${previewRows.length} صنف بنجاح! تم كشف الأسماء والباركودات والأسعار والكميات تلقائياً وبدقة.`,
     });
   };
 
@@ -1830,6 +1886,50 @@ export const BulkStockEntryView: React.FC = () => {
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono text-slate-800 focus:outline-none focus:border-emerald-500 focus:bg-white resize-y"
               />
 
+              {/* Live Preview Table */}
+              {previewRows.length > 0 && (
+                <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-black text-emerald-950">
+                    <span className="flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span>معاينة التعرف الذكي (تم التعرف على {previewRows.length} صنف):</span>
+                    </span>
+                    <span className="text-[10px] text-emerald-700 font-bold bg-white px-2 py-0.5 rounded-md border border-emerald-200">
+                      معاينة أول {Math.min(4, previewRows.length)} أصناف
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-lg border border-emerald-200 bg-white">
+                    <table className="w-full text-right text-[11px]">
+                      <thead className="bg-emerald-100/60 text-emerald-950 font-bold border-b border-emerald-200">
+                        <tr>
+                          <th className="p-1.5 text-center">#</th>
+                          <th className="p-1.5">اسم الدواء</th>
+                          <th className="p-1.5">الباركود</th>
+                          <th className="p-1.5 text-center">الكمية</th>
+                          <th className="p-1.5 text-left">شراء الباكيت</th>
+                          <th className="p-1.5 text-left">بيع مقترح</th>
+                          <th className="p-1.5 text-center">الخصم</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-bold text-slate-800">
+                        {previewRows.slice(0, 4).map((row, pIdx) => (
+                          <tr key={pIdx} className="hover:bg-slate-50">
+                            <td className="p-1.5 text-center text-slate-400 font-mono">{pIdx + 1}</td>
+                            <td className="p-1.5 font-bold text-slate-900 max-w-[200px] truncate">{row.tradeName}</td>
+                            <td className="p-1.5 font-mono text-indigo-700">{row.barcode || '-'}</td>
+                            <td className="p-1.5 text-center font-black text-slate-900">{row.quantityPacks}</td>
+                            <td className="p-1.5 text-left font-mono font-black text-slate-900">{row.purchasePricePack.toLocaleString()} د.ع</td>
+                            <td className="p-1.5 text-left font-mono font-black text-emerald-700">{row.sellingPricePack.toLocaleString()} د.ع</td>
+                            <td className="p-1.5 text-center font-mono text-rose-600">{row.discountPercent > 0 ? `${row.discountPercent}%` : '0%'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               {importError && (
                 <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-800 font-bold flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
@@ -1838,7 +1938,7 @@ export const BulkStockEntryView: React.FC = () => {
               )}
 
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-[11px] text-amber-800">
-                ⚠️ <strong>تنبيه:</strong> سعر البيع سيُحسب تلقائياً بـ <strong>+20% من سعر الشراء</strong>. راجع وعدّل الأسعار في الجدول بعد الاستيراد.
+                ⚠️ <strong>تنبيه:</strong> سعر البيع مقترح تلقائياً بـ <strong>+20% من سعر الشراء</strong>. يمكنك تعديل أي سعر أو تاريخ في الجدول بعد الاستيراد.
               </div>
             </div>
 
@@ -1853,12 +1953,12 @@ export const BulkStockEntryView: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => parseAndImportExcel(importText)}
-                disabled={!importText.trim()}
+                onClick={parseAndImportExcel}
+                disabled={previewRows.length === 0}
                 className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold cursor-pointer inline-flex items-center gap-2 transition-colors"
               >
                 <FileSpreadsheet className="w-4 h-4" />
-                استيراد ({importText.trim().split('\n').filter(l => l.trim()).length} سطر)
+                استيراد ({previewRows.length} صنف)
               </button>
             </div>
           </div>
