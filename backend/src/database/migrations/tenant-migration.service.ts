@@ -732,6 +732,19 @@ export class TenantMigrationService {
         `CREATE INDEX IF NOT EXISTS "idx_${schema}_audit_user" ON "${schema}".audit_logs (user_id)`,
       ],
     },
+
+    // ----------------------------------------------------------------
+    // 007: Dual Pricing System Columns (Official Price vs Pharmacy Selling Price)
+    // ----------------------------------------------------------------
+    {
+      name: '007_dual_pricing_columns',
+      description: 'Add official_price_pack and official_price_unit to inventory_items table across all tenant schemas',
+      sql: (schema: string) => [
+        `ALTER TABLE "${schema}".inventory_items
+          ADD COLUMN IF NOT EXISTS official_price_pack DECIMAL(12, 2),
+          ADD COLUMN IF NOT EXISTS official_price_unit DECIMAL(12, 2)`,
+      ],
+    },
   ];
 
   /**

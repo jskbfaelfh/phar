@@ -13,13 +13,18 @@ import {
   CreditCard,
   Banknote,
   Clock,
-  ArrowDownLeft,
   Tag,
   BadgePercent,
   Camera,
   FileSpreadsheet,
   X,
   Upload,
+  ChevronDown,
+  ChevronUp,
+  SlidersHorizontal,
+  Gift,
+  Percent,
+  MapPin,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250, calculateStripPrice } from '../utils/currency';
@@ -101,6 +106,7 @@ export const BulkStockEntryView: React.FC = () => {
 
   // New Medicine Modal State
   const [showNewMedModal, setShowNewMedModal] = useState(false);
+  const [showNewMedExtras, setShowNewMedExtras] = useState(false);
   const [newMedForm, setNewMedForm] = useState({
     tradeName: '',
     scientificName: '',
@@ -1102,322 +1108,347 @@ export const BulkStockEntryView: React.FC = () => {
                     : (qtyPacks > 0 ? Math.round(netLine / qtyPacks) : listPrice);
 
                   return (
-                    <tr key={row.tempId} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="p-2.5 text-center text-slate-400 font-bold">{idx + 1}</td>
+                    <React.Fragment key={row.tempId}>
+                      <tr className="hover:bg-slate-50/70 transition-colors">
+                        <td className="p-2.5 text-center text-slate-400 font-bold">{idx + 1}</td>
 
-                      {/* Medicine Info & Custom Name Input */}
-                      <td className="p-2.5">
-                        <div className="font-bold text-slate-900 text-xs">{row.tradeName}</div>
-                        <div className="text-[10px] text-slate-500 truncate max-w-[190px]">{row.scientificName}</div>
-                        {row.hasPreviousBatch && (
-                          <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[9px] font-bold">
-                            <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
-                            مسترد من الوجبة السابقة
-                          </span>
-                        )}
-                        {row.isNewMedicine && (
-                          <span className="inline-block mt-0.5 px-1 py-0.2 bg-amber-50 text-amber-700 border border-amber-200 rounded text-[9px] font-bold">
-                            دواء جديد كلياً
-                          </span>
-                        )}
-                        <div className="mt-1">
+                        {/* 1. Medicine Info & Custom Name Input + Badges for Extra Fields */}
+                        <td className="p-2.5">
+                          <div className="font-bold text-slate-900 text-xs">{row.tradeName}</div>
+                          <div className="text-[10px] text-slate-500 truncate max-w-[190px]">{row.scientificName}</div>
+                          <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                            {row.hasPreviousBatch && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[9px] font-bold">
+                                <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
+                                مسترد من الوجبة السابقة
+                              </span>
+                            )}
+                            {row.isNewMedicine && (
+                              <span className="inline-block px-1 py-0.2 bg-amber-50 text-amber-700 border border-amber-200 rounded text-[9px] font-bold">
+                                دواء جديد كلياً
+                              </span>
+                            )}
+                            {bonusPacks > 0 && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 bg-amber-100 text-amber-900 border border-amber-300 rounded text-[9px] font-black">
+                                <Gift className="w-2.5 h-2.5 text-amber-600" />
+                                +{bonusPacks} بونص {isAmortized ? '(مذوب)' : '(منفصل)'}
+                              </span>
+                            )}
+                            {discount > 0 && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 bg-rose-100 text-rose-900 border border-rose-300 rounded text-[9px] font-black">
+                                <Percent className="w-2.5 h-2.5 text-rose-600" />
+                                {discount}% خصم
+                              </span>
+                            )}
+                            {row.shelfLocation && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 bg-slate-100 text-slate-700 border border-slate-300 rounded text-[9px] font-bold">
+                                <MapPin className="w-2.5 h-2.5 text-slate-500" />
+                                رف: {row.shelfLocation}
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-1">
+                            <input
+                              type="text"
+                              value={row.customName || ''}
+                              onChange={(e) => updateRowField(row.tempId, 'customName', e.target.value)}
+                              placeholder="اسم دارج..."
+                              className="w-full px-2 py-1 bg-amber-50/50 border border-amber-200 rounded-md text-[10px] text-amber-950 font-bold placeholder:text-amber-600/60"
+                            />
+                          </div>
+                        </td>
+
+                        {/* 2. Barcode Input */}
+                        <td className="p-2">
                           <input
                             type="text"
-                            value={row.customName || ''}
-                            onChange={(e) => updateRowField(row.tempId, 'customName', e.target.value)}
-                            placeholder="اسم دارج..."
-                            className="w-full px-2 py-1 bg-amber-50/50 border border-amber-200 rounded-md text-[10px] text-amber-950 font-bold placeholder:text-amber-600/60"
+                            value={row.barcode || ''}
+                            onChange={(e) => updateRowField(row.tempId, 'barcode', e.target.value)}
+                            onKeyDown={(e) => handleKeyDown(e, `input-qty-${idx}`)}
+                            placeholder="امسح أو اكتب..."
+                            className="w-full px-2 py-1.5 bg-slate-50 border border-slate-300 rounded-md font-mono text-xs text-slate-800 focus:bg-white focus:border-indigo-500"
                           />
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Barcode Input */}
-                      <td className="p-2">
-                        <input
-                          type="text"
-                          value={row.barcode || ''}
-                          onChange={(e) => updateRowField(row.tempId, 'barcode', e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(e, `input-qty-${idx}`)}
-                          placeholder="امسح أو اكتب..."
-                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-300 rounded-md font-mono text-xs text-slate-800 focus:bg-white focus:border-indigo-500"
-                        />
-                      </td>
+                        {/* 3. Quantity Packs */}
+                        <td className="p-2">
+                          <input
+                            id={`input-qty-${idx}`}
+                            type="number"
+                            min="1"
+                            value={row.quantityPacks}
+                            onChange={(e) => updateRowField(row.tempId, 'quantityPacks', Number(e.target.value))}
+                            onKeyDown={(e) => handleKeyDown(e, `input-units-${idx}`)}
+                            className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-md font-black text-slate-900 text-center"
+                          />
+                        </td>
 
-                      {/* Quantity Packs */}
-                      <td className="p-2">
-                        <input
-                          id={`input-qty-${idx}`}
-                          type="number"
-                          min="1"
-                          value={row.quantityPacks}
-                          onChange={(e) => updateRowField(row.tempId, 'quantityPacks', Number(e.target.value))}
-                          onKeyDown={(e) => handleKeyDown(e, `input-bonus-${idx}`)}
-                          className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-md font-black text-slate-900 text-center"
-                        />
-                      </td>
+                        {/* 4. Units Per Pack */}
+                        <td className="p-2">
+                          <input
+                            id={`input-units-${idx}`}
+                            type="number"
+                            min="1"
+                            value={row.unitsPerPack}
+                            onChange={(e) => updateRowField(row.tempId, 'unitsPerPack', Number(e.target.value))}
+                            onKeyDown={(e) => handleKeyDown(e, `input-price-${idx}`)}
+                            className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-md text-center text-slate-700 font-bold"
+                          />
+                        </td>
 
-                      {/* Bonus Packs */}
-                      <td className="p-2 bg-amber-50/30">
-                        <input
-                          id={`input-bonus-${idx}`}
-                          type="number"
-                          min="0"
-                          value={row.bonusPacks}
-                          onChange={(e) => updateRowField(row.tempId, 'bonusPacks', Number(e.target.value))}
-                          onKeyDown={(e) => handleKeyDown(e, `input-units-${idx}`)}
-                          className="w-full px-2 py-1.5 bg-amber-50 border border-amber-300 rounded-md font-black text-amber-900 text-center"
-                        />
-                        {bonusPacks > 0 && (
-                          <div className="flex flex-col gap-1 mt-1">
-                            <button
-                              type="button"
-                              onClick={() => updateRowField(row.tempId, 'amortizeBonus', !isAmortized)}
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all cursor-pointer flex items-center justify-center gap-1 shadow-2xs ${
-                                isAmortized
-                                  ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
-                                  : 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
-                              }`}
-                              title={
-                                isAmortized
-                                  ? 'تذويب: تخفيض كلفة الشراء للباكيت وتوزيع البونص. انقر للفصل كوجبة بونص منفصلة'
-                                  : 'وجبة منفصلة: يدخل البونص كتشغيلة مجانية برصيد منفصل (كلفة 0). انقر للتحويل إلى تذويب'
-                              }
-                            >
-                              {isAmortized ? '💧 تذويب السعر' : '🎁 وجبة منفصلة'}
-                            </button>
-
-                            {!isAmortized && (
-                              <button
-                                type="button"
-                                onClick={() => updateRowField(row.tempId, 'showBonusConfig', !row.showBonusConfig)}
-                                className="text-[9px] text-slate-500 hover:text-indigo-600 underline font-medium text-center cursor-pointer"
+                        {/* 5. List Purchase Price */}
+                        <td className="p-2">
+                          <input
+                            id={`input-price-${idx}`}
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={row.purchasePricePack}
+                            onChange={(e) => updateRowField(row.tempId, 'purchasePricePack', Number(e.target.value))}
+                            onKeyDown={(e) => handleKeyDown(e, `input-official-pack-${idx}`)}
+                            className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-md font-bold text-slate-900 text-left"
+                          />
+                          {row.lastPurchasePricePack !== undefined &&
+                            row.lastPurchasePricePack > 0 &&
+                            row.purchasePricePack > 0 &&
+                            row.purchasePricePack !== row.lastPurchasePricePack && (
+                              <div
+                                className={`text-[10px] mt-1 font-bold leading-tight ${
+                                  row.purchasePricePack > row.lastPurchasePricePack
+                                    ? 'text-rose-600'
+                                    : 'text-emerald-600'
+                                }`}
                               >
-                                {row.showBonusConfig ? 'إخفاء الإعدادات' : '⚙️ تخصيص الوجبة'}
-                              </button>
-                            )}
-
-                            {!isAmortized && row.showBonusConfig && (
-                              <div className="mt-1 p-2 bg-white rounded-lg border border-amber-300 shadow-md text-[10px] space-y-1 text-right">
-                                <div className="font-bold text-amber-900 border-b border-amber-100 pb-0.5">
-                                  وجبة البونص ({bonusPacks} علب):
-                                </div>
-                                <div>
-                                  <label className="text-slate-600 block text-[9px]">رقم التشغيلة:</label>
-                                  <input
-                                    type="text"
-                                    value={row.bonusBatchNumber ?? (row.batchNumber ? `${row.batchNumber}-BONUS` : '')}
-                                    onChange={(e) => updateRowField(row.tempId, 'bonusBatchNumber', e.target.value)}
-                                    className="w-full px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded text-[10px] font-mono"
-                                    placeholder="تشغيلة البونص (اختياري)"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="text-slate-600 block text-[9px]">الصلاحية:</label>
-                                  <SmartExpiryInput
-                                    month={row.bonusExpiryMonth || row.expiryMonth}
-                                    year={row.bonusExpiryYear || row.expiryYear}
-                                    onChange={(m, y) => {
-                                      updateRowField(row.tempId, 'bonusExpiryMonth', m);
-                                      updateRowField(row.tempId, 'bonusExpiryYear', y);
-                                    }}
-                                  />
-                                </div>
+                                {row.purchasePricePack > row.lastPurchasePricePack
+                                  ? `🔺 ارتفع (${row.lastPurchasePricePack.toLocaleString()} د.ع)`
+                                  : `🔻 انخفض (${row.lastPurchasePricePack.toLocaleString()} د.ع)`}
                               </div>
                             )}
-                          </div>
-                        )}
-                      </td>
+                        </td>
 
-                      {/* Units Per Pack */}
-                      <td className="p-2">
-                        <input
-                          id={`input-units-${idx}`}
-                          type="number"
-                          min="1"
-                          value={row.unitsPerPack}
-                          onChange={(e) => updateRowField(row.tempId, 'unitsPerPack', Number(e.target.value))}
-                          onKeyDown={(e) => handleKeyDown(e, `input-price-${idx}`)}
-                          className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-md text-center text-slate-700 font-bold"
-                        />
-                      </td>
+                        {/* 6. Official Price Pack (🏛️ الرسمي) */}
+                        <td className="p-2 bg-amber-50/30">
+                          <input
+                            id={`input-official-pack-${idx}`}
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={row.officialPricePack ?? row.sellingPricePack}
+                            onChange={(e) => updateRowField(row.tempId, 'officialPricePack', Number(e.target.value))}
+                            onKeyDown={(e) => handleKeyDown(e, `input-selling-pack-${idx}`)}
+                            className="w-full px-2 py-1.5 bg-amber-50 border border-amber-300 text-amber-950 rounded-md font-bold text-left"
+                            placeholder="الرسمي"
+                          />
+                        </td>
 
-                      {/* List Purchase Price */}
-                      <td className="p-2">
-                        <input
-                          id={`input-price-${idx}`}
-                          type="number"
-                          min="0"
-                          step="250"
-                          value={row.purchasePricePack}
-                          onChange={(e) => updateRowField(row.tempId, 'purchasePricePack', Number(e.target.value))}
-                          onKeyDown={(e) => handleKeyDown(e, `input-discount-${idx}`)}
-                          className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-md font-bold text-slate-900 text-left"
-                        />
-                        {row.lastPurchasePricePack !== undefined &&
-                          row.lastPurchasePricePack > 0 &&
-                          row.purchasePricePack > 0 &&
-                          row.purchasePricePack !== row.lastPurchasePricePack && (
-                            <div
-                              className={`text-[10px] mt-1 font-bold leading-tight ${
-                                row.purchasePricePack > row.lastPurchasePricePack
-                                  ? 'text-rose-600'
-                                  : 'text-emerald-600'
+                        {/* 7. Selling Price Pack (بيع الفعلي علبة) */}
+                        <td className="p-2">
+                          <input
+                            id={`input-selling-pack-${idx}`}
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={row.sellingPricePack}
+                            onChange={(e) => updateRowField(row.tempId, 'sellingPricePack', Number(e.target.value))}
+                            onKeyDown={(e) => handleKeyDown(e, `input-selling-unit-${idx}`)}
+                            className="w-full px-2 py-1.5 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-md font-black text-left"
+                          />
+                        </td>
+
+                        {/* 8. Selling Price Unit (بيع الفعلي شريط) */}
+                        <td className="p-2">
+                          <input
+                            id={`input-selling-unit-${idx}`}
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={row.sellingPriceUnit}
+                            onChange={(e) => updateRowField(row.tempId, 'sellingPriceUnit', Number(e.target.value))}
+                            onKeyDown={(e) => handleKeyDown(e, `input-exp-month-${idx}`)}
+                            className="w-full px-2 py-1.5 bg-blue-50 border border-blue-300 text-blue-950 rounded-md font-black text-left"
+                          />
+                        </td>
+
+                        {/* 9. Expiry Date (الصلاحية) */}
+                        <td className="p-2">
+                          <SmartExpiryInput
+                            month={row.expiryMonth}
+                            year={row.expiryYear}
+                            monthId={`input-exp-month-${idx}`}
+                            yearId={`input-exp-year-${idx}`}
+                            onChange={(m, y) => {
+                              updateRowField(row.tempId, 'expiryMonth', m);
+                              updateRowField(row.tempId, 'expiryYear', y);
+                            }}
+                            onNext={() => {
+                              const batchInput = document.getElementById(`input-batch-${idx}`);
+                              if (batchInput) {
+                                batchInput.focus();
+                                (batchInput as HTMLInputElement).select?.();
+                              }
+                            }}
+                          />
+                        </td>
+
+                        {/* 10. Batch Number (الوجبة) */}
+                        <td className="p-2">
+                          <input
+                            id={`input-batch-${idx}`}
+                            type="text"
+                            value={row.batchNumber || ''}
+                            onChange={(e) => updateRowField(row.tempId, 'batchNumber', e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                searchInputRef.current?.focus();
+                                searchInputRef.current?.select();
+                              }
+                            }}
+                            placeholder="اختياري"
+                            className="w-full px-1.5 py-1.5 bg-white border border-slate-300 rounded-md text-center text-xs font-mono"
+                          />
+                        </td>
+
+                        {/* 11. Actions: زر "المزيد" + زر الحذف */}
+                        <td className="p-2 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => updateRowField(row.tempId, 'showExtraFields', !row.showExtraFields)}
+                              className={`px-2 py-1 rounded-md text-[11px] font-bold border transition-all cursor-pointer flex items-center gap-0.5 shadow-2xs ${
+                                row.showExtraFields || bonusPacks > 0 || discount > 0 || row.shelfLocation
+                                  ? 'bg-indigo-50 text-indigo-700 border-indigo-300 hover:bg-indigo-100'
+                                  : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
                               }`}
+                              title="إظهار / إخفاء (البونص، الخصم، الرف)"
                             >
-                              {row.purchasePricePack > row.lastPurchasePricePack
-                                ? `🔺 ارتفع سعر الشراء (آخر سعر: ${row.lastPurchasePricePack.toLocaleString()} د.ع)`
-                                : `🔻 انخفض سعر الشراء (آخر سعر: ${row.lastPurchasePricePack.toLocaleString()} د.ع)`}
+                              {row.showExtraFields ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              <span>المزيد</span>
+                              {(bonusPacks > 0 || discount > 0 || row.shelfLocation) && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 inline-block mr-0.5" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => removeRow(row.tempId)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                              title="حذف من الفاتورة"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* Expandable "المزيد" Sub-Panel: Bonus, Discount %, Shelf Location */}
+                      {row.showExtraFields && (
+                        <tr className="bg-indigo-50/30 border-b border-indigo-100">
+                          <td colSpan={12} className="p-3 bg-gradient-to-r from-slate-50 via-indigo-50/25 to-slate-50">
+                            <div className="flex flex-wrap items-start gap-4 p-3 bg-white rounded-xl border border-indigo-100 shadow-2xs">
+                              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 w-full pb-1.5 border-b border-slate-100">
+                                <SlidersHorizontal className="w-4 h-4 text-indigo-600" />
+                                <span>خيارات إضافية: {row.tradeName}</span>
+                              </div>
+
+                              {/* 1. Bonus Pack */}
+                              <div className="flex-1 min-w-[210px] bg-amber-50/50 p-2.5 rounded-lg border border-amber-200">
+                                <label className="block text-[11px] font-bold text-amber-900 mb-1 flex items-center gap-1">
+                                  <Gift className="w-3.5 h-3.5 text-amber-600" />
+                                  البونص المجاني (علب):
+                                </label>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    id={`input-bonus-${idx}`}
+                                    type="number"
+                                    min="0"
+                                    value={row.bonusPacks}
+                                    onChange={(e) => updateRowField(row.tempId, 'bonusPacks', Number(e.target.value))}
+                                    className="w-20 px-2 py-1 bg-white border border-amber-300 rounded-md font-black text-amber-900 text-center text-xs"
+                                    placeholder="0"
+                                  />
+                                  {bonusPacks > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => updateRowField(row.tempId, 'amortizeBonus', !isAmortized)}
+                                      className={`px-2 py-1 rounded text-[10px] font-bold border transition-all cursor-pointer shadow-2xs ${
+                                        isAmortized
+                                          ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                                          : 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                                      }`}
+                                    >
+                                      {isAmortized ? '💧 تذويب السعر' : '🎁 وجبة منفصلة'}
+                                    </button>
+                                  )}
+                                </div>
+                                {!isAmortized && bonusPacks > 0 && (
+                                  <div className="mt-2 pt-2 border-t border-amber-200 space-y-1 text-right">
+                                    <div>
+                                      <label className="text-slate-600 block text-[9px]">رقم تشغيلة البونص:</label>
+                                      <input
+                                        type="text"
+                                        value={row.bonusBatchNumber ?? (row.batchNumber ? `${row.batchNumber}-BONUS` : '')}
+                                        onChange={(e) => updateRowField(row.tempId, 'bonusBatchNumber', e.target.value)}
+                                        className="w-full px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[10px] font-mono"
+                                        placeholder="اختياري"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="text-slate-600 block text-[9px]">صلاحية البونص:</label>
+                                      <SmartExpiryInput
+                                        month={row.bonusExpiryMonth || row.expiryMonth}
+                                        year={row.bonusExpiryYear || row.expiryYear}
+                                        onChange={(m, y) => {
+                                          updateRowField(row.tempId, 'bonusExpiryMonth', m);
+                                          updateRowField(row.tempId, 'bonusExpiryYear', y);
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* 2. Discount % */}
+                              <div className="flex-1 min-w-[210px] bg-rose-50/50 p-2.5 rounded-lg border border-rose-200">
+                                <label className="block text-[11px] font-bold text-rose-900 mb-1 flex items-center gap-1">
+                                  <Percent className="w-3.5 h-3.5 text-rose-600" />
+                                  نسبة الخصم (%):
+                                </label>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    id={`input-discount-${idx}`}
+                                    type="number"
+                                    min="0"
+                                    max="100"
+                                    value={row.discountPercent}
+                                    onChange={(e) => updateRowField(row.tempId, 'discountPercent', Number(e.target.value))}
+                                    className="w-20 px-2 py-1 bg-white border border-rose-300 rounded-md font-black text-rose-900 text-center text-xs"
+                                    placeholder="0%"
+                                  />
+                                  <div className="text-[11px] text-slate-700 font-bold">
+                                    صافي الكلفة: <span className="text-indigo-900 font-black">{effectiveCostPerPack.toLocaleString()} د.ع</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* 3. Shelf Location */}
+                              <div className="flex-1 min-w-[180px] bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                                <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
+                                  <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                                  موقع الرف (Shelf):
+                                </label>
+                                <input
+                                  id={`input-shelf-${idx}`}
+                                  type="text"
+                                  value={row.shelfLocation || ''}
+                                  onChange={(e) => updateRowField(row.tempId, 'shelfLocation', e.target.value)}
+                                  placeholder="مثال: A-01"
+                                  className="w-full px-2 py-1 bg-white border border-slate-300 rounded-md text-xs font-bold font-mono text-slate-900 focus:border-indigo-500"
+                                />
+                              </div>
                             </div>
-                          )}
-                      </td>
-
-                      {/* Discount % */}
-                      <td className="p-2 bg-rose-50/30">
-                        <input
-                          id={`input-discount-${idx}`}
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={row.discountPercent}
-                          onChange={(e) => updateRowField(row.tempId, 'discountPercent', Number(e.target.value))}
-                          onKeyDown={(e) => handleKeyDown(e, `input-selling-pack-${idx}`)}
-                          className="w-full px-2 py-1.5 bg-rose-50 border border-rose-300 rounded-md font-black text-rose-900 text-center"
-                        />
-                      </td>
-
-                      {/* Calculated Effective Net Cost per Pack */}
-                      <td className="p-2.5 bg-indigo-50/40 font-black text-indigo-950 text-xs">
-                        <div>{effectiveCostPerPack.toLocaleString()} د.ع</div>
-                        {bonusPacks > 0 && (
-                          <div className="mt-1">
-                            {isAmortized ? (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded text-[9px] font-bold">
-                                💧 كلفة مذوبة ({totalPacks} علبة)
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[9px] font-bold">
-                                📦 شراء ({qtyPacks}) + 🎁 مجاني ({bonusPacks})
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        {discount > 0 && (
-                          <div className="text-[9px] text-rose-600 font-bold flex items-center gap-0.5 mt-0.5">
-                            <ArrowDownLeft className="w-2.5 h-2.5" />
-                            خصم {discount}%
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Official Price Pack (المعد للعرض بالكاشير) */}
-                      <td className="p-2 bg-amber-50/30">
-                        <input
-                          id={`input-official-pack-${idx}`}
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={row.officialPricePack ?? row.sellingPricePack}
-                          onChange={(e) => updateRowField(row.tempId, 'officialPricePack', Number(e.target.value))}
-                          onKeyDown={(e) => handleKeyDown(e, `input-selling-pack-${idx}`)}
-                          className="w-full px-2 py-1.5 bg-amber-50 border border-amber-300 text-amber-950 rounded-md font-bold text-left"
-                          placeholder="الرسمي"
-                        />
-                      </td>
-
-                      {/* Selling Price Pack */}
-                      <td className="p-2">
-                        <input
-                          id={`input-selling-pack-${idx}`}
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={row.sellingPricePack}
-                          onChange={(e) => updateRowField(row.tempId, 'sellingPricePack', Number(e.target.value))}
-                          onKeyDown={(e) => handleKeyDown(e, `input-selling-unit-${idx}`)}
-                          className="w-full px-2 py-1.5 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-md font-black text-left"
-                        />
-                      </td>
-
-                      {/* Selling Price Unit (Strip) */}
-                      <td className="p-2">
-                        <input
-                          id={`input-selling-unit-${idx}`}
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={row.sellingPriceUnit}
-                          onChange={(e) => updateRowField(row.tempId, 'sellingPriceUnit', Number(e.target.value))}
-                          onKeyDown={(e) => handleKeyDown(e, `input-exp-month-${idx}`)}
-                          className="w-full px-2 py-1.5 bg-blue-50 border border-blue-300 text-blue-950 rounded-md font-black text-left"
-                        />
-                      </td>
-
-                      {/* Expiry Date (Month 1-12 without zero, Year 20XX with Enter navigation) */}
-                      <td className="p-2">
-                        <SmartExpiryInput
-                          month={row.expiryMonth}
-                          year={row.expiryYear}
-                          monthId={`input-exp-month-${idx}`}
-                          yearId={`input-exp-year-${idx}`}
-                          onChange={(m, y) => {
-                            updateRowField(row.tempId, 'expiryMonth', m);
-                            updateRowField(row.tempId, 'expiryYear', y);
-                          }}
-                          onNext={() => {
-                            const batchInput = document.getElementById(`input-batch-${idx}`);
-                            if (batchInput) {
-                              batchInput.focus();
-                              (batchInput as HTMLInputElement).select?.();
-                            } else {
-                              document.getElementById(`input-shelf-${idx}`)?.focus();
-                            }
-                          }}
-                        />
-                      </td>
-
-                      {/* Batch Number */}
-                      <td className="p-2">
-                        <input
-                          id={`input-batch-${idx}`}
-                          type="text"
-                          value={row.batchNumber || ''}
-                          onChange={(e) => updateRowField(row.tempId, 'batchNumber', e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(e, `input-shelf-${idx}`)}
-                          placeholder="اختياري"
-                          className="w-full px-1.5 py-1.5 bg-white border border-slate-300 rounded-md text-center text-xs font-mono"
-                        />
-                      </td>
-
-                      {/* Shelf Location */}
-                      <td className="p-2">
-                        <input
-                          id={`input-shelf-${idx}`}
-                          type="text"
-                          value={row.shelfLocation || ''}
-                          onChange={(e) => updateRowField(row.tempId, 'shelfLocation', e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              searchInputRef.current?.focus();
-                              searchInputRef.current?.select();
-                            }
-                          }}
-                          placeholder="A-01"
-                          className="w-full px-1.5 py-1.5 bg-slate-50 border border-slate-300 rounded-md text-center text-xs font-bold font-mono text-slate-900 focus:bg-white focus:border-indigo-500"
-                        />
-                      </td>
-
-                      {/* Delete */}
-                      <td className="p-2 text-center">
-                        <button
-                          onClick={() => removeRow(row.tempId)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
-                          title="حذف من الفاتورة"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })
               )}
@@ -1548,7 +1579,7 @@ export const BulkStockEntryView: React.FC = () => {
 
               <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">كمية العلب</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">كمية العلب *</label>
                   <input
                     type="number"
                     min="1"
@@ -1559,52 +1590,11 @@ export const BulkStockEntryView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-amber-800 mb-1">بونص مجاني</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر الشراء (د.ع)</label>
                   <input
                     type="number"
                     min="0"
-                    value={newMedForm.bonusPacks}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, bonusPacks: Number(e.target.value) })}
-                    className="w-full px-3 py-2 border border-amber-300 bg-amber-50 text-amber-950 rounded-lg text-sm font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-rose-800 mb-1">خصم %</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={newMedForm.discountPercent}
-                    onChange={(e) => setNewMedForm({ ...newMedForm, discountPercent: Number(e.target.value) })}
-                    className="w-full px-3 py-2 border border-rose-300 bg-rose-50 text-rose-950 rounded-lg text-sm font-bold"
-                  />
-                </div>
-              </div>
-
-              {Number(newMedForm.bonusPacks || 0) > 0 && (
-                <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 flex items-center justify-between text-xs">
-                  <span className="font-bold text-amber-900">طريقة احتساب البونص ({newMedForm.bonusPacks} علب):</span>
-                  <button
-                    type="button"
-                    onClick={() => setNewMedForm({ ...newMedForm, amortizeBonus: !newMedForm.amortizeBonus })}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
-                      newMedForm.amortizeBonus
-                        ? 'bg-blue-50 text-blue-700 border-blue-200'
-                        : 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                    }`}
-                  >
-                    {newMedForm.amortizeBonus ? '💧 تذويب السعر' : '🎁 وجبة منفصلة'}
-                  </button>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر الشراء للعلبة (د.ع)</label>
-                  <input
-                    type="number"
-                    min="250"
-                    step="250"
+                    step="1"
                     required
                     value={newMedForm.purchasePricePack}
                     onChange={(e) => setNewMedForm({ ...newMedForm, purchasePricePack: Number(e.target.value) })}
@@ -1612,11 +1602,11 @@ export const BulkStockEntryView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر البيع للعلبة (د.ع) *</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر البيع (د.ع) *</label>
                   <input
                     type="number"
-                    min="250"
-                    step="250"
+                    min="0"
+                    step="1"
                     required
                     value={newMedForm.sellingPricePack}
                     onChange={(e) => setNewMedForm({ ...newMedForm, sellingPricePack: Number(e.target.value) })}
@@ -1625,33 +1615,109 @@ export const BulkStockEntryView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Expiry & Shelf Location */}
-              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    شهر / سنة الصلاحية (1-12 و 20XX)
-                  </label>
-                  <SmartExpiryInput
-                    month={newMedForm.expiryMonth}
-                    year={newMedForm.expiryYear}
-                    onChange={(m, y) =>
-                      setNewMedForm((prev) => ({ ...prev, expiryMonth: m, expiryYear: y }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">موقع الرف</label>
-                  <input
-                    type="text"
-                    value={newMedForm.shelfLocation}
-                    onChange={(e) =>
-                      setNewMedForm((prev) => ({ ...prev, shelfLocation: e.target.value }))
-                    }
-                    placeholder="مثال: A-01"
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-bold font-mono text-slate-900"
-                  />
-                </div>
+              {/* Expiry Date */}
+              <div className="pt-2">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  شهر / سنة الصلاحية (1-12 و 20XX)
+                </label>
+                <SmartExpiryInput
+                  month={newMedForm.expiryMonth}
+                  year={newMedForm.expiryYear}
+                  onChange={(m, y) =>
+                    setNewMedForm((prev) => ({ ...prev, expiryMonth: m, expiryYear: y }))
+                  }
+                />
               </div>
+
+              {/* Toggle Button for Extra Fields (المزيد: البونص، الخصم، الرف) */}
+              <button
+                type="button"
+                onClick={() => setShowNewMedExtras(!showNewMedExtras)}
+                className={`w-full py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-between border transition-all cursor-pointer ${
+                  showNewMedExtras || newMedForm.bonusPacks > 0 || newMedForm.discountPercent > 0 || newMedForm.shelfLocation
+                    ? 'bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>المزيد (البونص، الخصم، الرف)</span>
+                  {(newMedForm.bonusPacks > 0 || newMedForm.discountPercent > 0 || newMedForm.shelfLocation) && (
+                    <span className="px-1.5 py-0.2 bg-indigo-600 text-white rounded text-[10px] font-bold">مُحدد</span>
+                  )}
+                </span>
+                {showNewMedExtras ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+              </button>
+
+              {/* Collapsed Section for Extra Fields */}
+              {showNewMedExtras && (
+                <div className="p-3 bg-slate-50 rounded-xl border border-indigo-100 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-amber-900 mb-1 flex items-center gap-1">
+                        <Gift className="w-3.5 h-3.5 text-amber-600" />
+                        بونص مجاني (علب):
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={newMedForm.bonusPacks}
+                        onChange={(e) => setNewMedForm({ ...newMedForm, bonusPacks: Number(e.target.value) })}
+                        className="w-full px-3 py-2 border border-amber-300 bg-amber-50 text-amber-950 rounded-lg text-sm font-bold"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-rose-900 mb-1 flex items-center gap-1">
+                        <Percent className="w-3.5 h-3.5 text-rose-600" />
+                        نسبة الخصم (%):
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={newMedForm.discountPercent}
+                        onChange={(e) => setNewMedForm({ ...newMedForm, discountPercent: Number(e.target.value) })}
+                        className="w-full px-3 py-2 border border-rose-300 bg-rose-50 text-rose-950 rounded-lg text-sm font-bold"
+                        placeholder="0%"
+                      />
+                    </div>
+                  </div>
+
+                  {Number(newMedForm.bonusPacks || 0) > 0 && (
+                    <div className="p-2 bg-amber-50 rounded-lg border border-amber-200 flex items-center justify-between text-xs">
+                      <span className="font-bold text-amber-900">طريقة احتساب البونص:</span>
+                      <button
+                        type="button"
+                        onClick={() => setNewMedForm({ ...newMedForm, amortizeBonus: !newMedForm.amortizeBonus })}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                          newMedForm.amortizeBonus
+                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                        }`}
+                      >
+                        {newMedForm.amortizeBonus ? '💧 تذويب السعر' : '🎁 وجبة منفصلة'}
+                      </button>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                      <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                      موقع الرف (Shelf Location):
+                    </label>
+                    <input
+                      type="text"
+                      value={newMedForm.shelfLocation}
+                      onChange={(e) =>
+                        setNewMedForm((prev) => ({ ...prev, shelfLocation: e.target.value }))
+                      }
+                      placeholder="مثال: A-01"
+                      className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-bold font-mono text-slate-900 bg-white"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="pt-3 flex gap-2">
                 <button

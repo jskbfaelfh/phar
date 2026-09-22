@@ -649,23 +649,38 @@ export class InventoryService {
               ? item.shelfLocation.trim()
               : existing?.shelfLocation || null;
 
+          let resolvedOfficialPack = Number(
+            item.officialPricePack !== undefined && item.officialPricePack !== null
+              ? item.officialPricePack
+              : resolvedSellingPack,
+          );
+          let resolvedOfficialUnit = Number(
+            item.officialPriceUnit !== undefined && item.officialPriceUnit !== null
+              ? item.officialPriceUnit
+              : resolvedSellingUnit,
+          );
+
           if (existing) {
             inventoryItemId = existing.id;
-            // Update custom_name, selling prices, units per pack, and shelf_location safely
+            // Update custom_name, selling prices, official prices, units per pack, and shelf_location safely
             await tx.$executeRawUnsafe(
               `UPDATE "${schemaName}".inventory_items
                SET custom_name = COALESCE($1, custom_name),
                    units_per_pack = $2,
                    selling_price_pack = $3,
                    selling_price_unit = $4,
-                   min_alert_units = COALESCE($5, min_alert_units),
-                   shelf_location = COALESCE($6, shelf_location),
+                   official_price_pack = $5,
+                   official_price_unit = $6,
+                   min_alert_units = COALESCE($7, min_alert_units),
+                   shelf_location = COALESCE($8, shelf_location),
                    updated_at = NOW()
-               WHERE id = $7::uuid`,
+               WHERE id = $9::uuid`,
               item.customName || null,
               resolvedUnits,
               resolvedSellingPack,
               resolvedSellingUnit,
+              resolvedOfficialPack,
+              resolvedOfficialUnit,
               item.minAlertUnits || 5,
               resolvedShelf,
               inventoryItemId,
@@ -674,14 +689,16 @@ export class InventoryService {
             inventoryItemId = crypto.randomUUID();
             await tx.$executeRawUnsafe(
               `INSERT INTO "${schemaName}".inventory_items
-               (id, medicine_id, custom_name, units_per_pack, selling_price_pack, selling_price_unit, min_alert_units, shelf_location, created_at, updated_at)
-               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, NOW(), NOW())`,
+               (id, medicine_id, custom_name, units_per_pack, selling_price_pack, selling_price_unit, official_price_pack, official_price_unit, min_alert_units, shelf_location, created_at, updated_at)
+               VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())`,
               inventoryItemId,
               finalMedicineId,
               item.customName || null,
               resolvedUnits,
               resolvedSellingPack,
               resolvedSellingUnit,
+              resolvedOfficialPack,
+              resolvedOfficialUnit,
               item.minAlertUnits || 5,
               resolvedShelf,
             );
@@ -1367,13 +1384,17 @@ export class InventoryService {
        SET custom_name = $1,
            selling_price_pack = $2,
            selling_price_unit = $3,
-           min_alert_units = COALESCE($4, min_alert_units),
-           shelf_location = $5,
+           official_price_pack = $4,
+           official_price_unit = $5,
+           min_alert_units = COALESCE($6, min_alert_units),
+           shelf_location = $7,
            updated_at = NOW()
-       WHERE id = $6::uuid`,
+       WHERE id = $8::uuid`,
       dto.customName !== undefined ? dto.customName : null,
       dto.sellingPricePack,
       dto.sellingPriceUnit,
+      dto.officialPricePack !== undefined ? dto.officialPricePack : (dto.sellingPricePack || null),
+      dto.officialPriceUnit !== undefined ? dto.officialPriceUnit : (dto.sellingPriceUnit || null),
       dto.minAlertUnits || null,
       dto.shelfLocation !== undefined ? dto.shelfLocation : null,
       inventoryItemId,

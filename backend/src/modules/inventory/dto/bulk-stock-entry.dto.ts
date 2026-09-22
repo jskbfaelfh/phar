@@ -71,16 +71,26 @@ export class BulkStockItemDto {
   discountPercent?: number;
 
   @IsNumber()
-  @Min(250, { message: 'أقل سعر شراء للعلبة هو 250 د.ع' })
+  @Min(0, { message: 'سعر شراء العلبة يجب أن يكون صفر أو أكثر' })
   purchasePricePack: number;
 
   @IsNumber()
-  @Min(250, { message: 'أقل سعر بيع للعلبة هو 250 د.ع' })
+  @Min(0, { message: 'سعر البيع الفعلي للعلبة يجب أن يكون صفر أو أكثر' })
   sellingPricePack: number;
 
   @IsNumber()
-  @Min(250, { message: 'أقل سعر بيع للشريط هو 250 د.ع' })
+  @Min(0, { message: 'سعر البيع الفعلي للشريط يجب أن يكون صفر أو أكثر' })
   sellingPriceUnit: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  officialPricePack?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  officialPriceUnit?: number;
 
   @IsInt()
   @Min(1)
@@ -174,12 +184,22 @@ export class UpdateItemPriceDto {
   barcode?: string;
 
   @IsNumber()
-  @Min(250, { message: 'أقل سعر بيع للعلبة هو 250 د.ع' })
+  @Min(0, { message: 'سعر البيع الفعلي للعلبة يجب أن يكون صفر أو أكثر' })
   sellingPricePack: number;
 
   @IsNumber()
-  @Min(250, { message: 'أقل سعر بيع للشريط هو 250 د.ع' })
+  @Min(0, { message: 'سعر البيع الفعلي للشريط يجب أن يكون صفر أو أكثر' })
   sellingPriceUnit: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  officialPricePack?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  officialPriceUnit?: number;
 
   @IsInt()
   @Min(1)

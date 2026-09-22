@@ -17,6 +17,9 @@ import {
   MapPin,
   Plus,
   Camera,
+  ChevronDown,
+  ChevronUp,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250, calculateStripPrice } from '../utils/currency';
@@ -90,9 +93,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
   const [catalogResults, setCatalogResults] = useState<any[]>([]);
   const [quickAddMed, setQuickAddMed] = useState<any | null>(null);
   const [savingQuickAdd, setSavingQuickAdd] = useState(false);
+  const [showQuickAddExtras, setShowQuickAddExtras] = useState(false);
   const [quickAddForm, setQuickAddForm] = useState({
     sellingPricePack: 0,
     sellingPriceUnit: 0,
+    officialPricePack: 0,
+    officialPriceUnit: 0,
     purchasePricePack: 0,
     lastPurchasePricePack: 0,
     quantityPacks: 10,
@@ -112,6 +118,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
     barcode: '',
     sellingPricePack: 0,
     sellingPriceUnit: 0,
+    officialPricePack: 0,
+    officialPriceUnit: 0,
     minAlertUnits: 5,
     shelfLocation: '',
   });
@@ -270,6 +278,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
     setQuickAddForm({
       sellingPricePack: sellingPack,
       sellingPriceUnit: sellingUnit,
+      officialPricePack: Number(history?.officialPricePack || sellingPack),
+      officialPriceUnit: Number(history?.officialPriceUnit || sellingUnit),
       purchasePricePack: purchasePrice,
       lastPurchasePricePack: lastPurchasePrice,
       quantityPacks: 10,
@@ -299,6 +309,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
               quantityPacks: Number(quickAddForm.quantityPacks) || 1,
               sellingPricePack: Number(quickAddForm.sellingPricePack) || 0,
               sellingPriceUnit: Number(quickAddForm.sellingPriceUnit) || 0,
+              officialPricePack: Number(quickAddForm.officialPricePack || quickAddForm.sellingPricePack) || 0,
+              officialPriceUnit: Number(quickAddForm.officialPriceUnit || quickAddForm.sellingPriceUnit) || 0,
               purchasePricePack: Number(quickAddForm.purchasePricePack) || 0,
               expiryMonth: Number(quickAddForm.expiryMonth) || 12,
               expiryYear: Number(quickAddForm.expiryYear) || (new Date().getFullYear() + 2),
@@ -338,11 +350,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
       initialBarcode = String(maxNum + 1);
     }
 
+    const selPack = Number(item.sellingPricePack || 0);
+    const selUnit = Number(item.sellingPriceUnit || 0);
+    const offPack = Number(item.officialPricePack || selPack);
+    const offUnit = Number(item.officialPriceUnit || selUnit);
+
     setEditForm({
       customName: item.customName || '',
       barcode: initialBarcode,
-      sellingPricePack: Number(item.sellingPricePack || 0),
-      sellingPriceUnit: Number(item.sellingPriceUnit || 0),
+      sellingPricePack: selPack,
+      sellingPriceUnit: selUnit,
+      officialPricePack: offPack,
+      officialPriceUnit: offUnit,
       minAlertUnits: Number(item.minAlertUnits || 5),
       shelfLocation: item.shelfLocation || '',
     });
@@ -384,6 +403,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
           barcode: editForm.barcode?.trim() || undefined,
           sellingPricePack: Number(editForm.sellingPricePack),
           sellingPriceUnit: Number(editForm.sellingPriceUnit),
+          officialPricePack: Number(editForm.officialPricePack),
+          officialPriceUnit: Number(editForm.officialPriceUnit),
           minAlertUnits: Number(editForm.minAlertUnits),
           shelfLocation: editForm.shelfLocation ? editForm.shelfLocation.trim() : null,
         }),
@@ -1104,30 +1125,68 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر بيع الباكيت:</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={250}
-                    value={editForm.sellingPricePack}
-                    onChange={(e) => setEditForm({ ...editForm, sellingPricePack: Number(e.target.value) })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-mono font-bold"
-                    required
-                  />
+              {/* Dual Pricing Section */}
+              <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-200/80 space-y-3">
+                <div className="text-xs font-black text-amber-900 flex items-center gap-1">
+                  <span>🏛️ السعر النقابي / الرسمي (المعد للعرض بالكاشير)</span>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر بيع الشريط:</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={250}
-                    value={editForm.sellingPriceUnit}
-                    onChange={(e) => setEditForm({ ...editForm, sellingPriceUnit: Number(e.target.value) })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-mono font-bold"
-                    required
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">السعر الرسمي للعلبة:</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={editForm.officialPricePack}
+                      onChange={(e) => setEditForm({ ...editForm, officialPricePack: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900"
+                      placeholder="السعر الرسمي للباكيت"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">السعر الرسمي للشريط:</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={editForm.officialPriceUnit}
+                      onChange={(e) => setEditForm({ ...editForm, officialPriceUnit: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900"
+                      placeholder="السعر الرسمي للشريط"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-indigo-50/60 p-3 rounded-xl border border-indigo-200/80 space-y-3">
+                <div className="text-xs font-black text-indigo-900 flex items-center gap-1">
+                  <span>💊 سعر البيع الفعلي للصيدلية (الحقيقي)</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">سعر بيع الباكيت الفعلي:</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={editForm.sellingPricePack}
+                      onChange={(e) => setEditForm({ ...editForm, sellingPricePack: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-white border border-indigo-300 rounded-xl text-xs font-mono font-black text-indigo-950"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">سعر بيع الشريط الفعلي:</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={editForm.sellingPriceUnit}
+                      onChange={(e) => setEditForm({ ...editForm, sellingPriceUnit: Number(e.target.value) })}
+                      className="w-full px-3 py-2 bg-white border border-indigo-300 rounded-xl text-xs font-mono font-black text-indigo-950"
+                      required
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1407,15 +1466,54 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
             </div>
 
             <form onSubmit={handleQuickAddSubmit} className="space-y-4">
+              {/* Dual Pricing in Quick Add Modal */}
+              <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200 space-y-2">
+                <span className="text-xs font-black text-amber-900 block">🏛️ السعر النقابي / الرسمي (اختياري للعرض بالكاشير)</span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">السعر الرسمي للعلبة:</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={quickAddForm.officialPricePack || ''}
+                      onChange={(e) => {
+                        const offPack = Number(e.target.value) || 0;
+                        const units = Number(quickAddForm.unitsPerPack) || 1;
+                        setQuickAddForm((prev) => ({
+                          ...prev,
+                          officialPricePack: offPack,
+                          officialPriceUnit: units > 1 ? calculateStripPrice(offPack, units) : offPack,
+                        }));
+                      }}
+                      placeholder="مثال: 5000"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:border-indigo-600 focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">السعر الرسمي للشريط:</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={quickAddForm.officialPriceUnit || ''}
+                      onChange={(e) => setQuickAddForm((prev) => ({ ...prev, officialPriceUnit: Number(e.target.value) || 0 }))}
+                      placeholder="مثال: 2500"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:border-indigo-600 focus:outline-hidden"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    سعر البيع للباكيت (د.ع) <span className="text-rose-500">*</span>
+                    سعر البيع الفعلي للعلبة (د.ع) <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="number"
                     min="0"
-                    step="250"
+                    step="1"
                     required
                     value={quickAddForm.sellingPricePack || ''}
                     onChange={(e) => {
@@ -1425,25 +1523,27 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                         ...prev,
                         sellingPricePack: packPrice,
                         sellingPriceUnit: units > 1 ? calculateStripPrice(packPrice, units) : packPrice,
+                        officialPricePack: prev.officialPricePack || packPrice,
+                        officialPriceUnit: prev.officialPriceUnit || (units > 1 ? calculateStripPrice(packPrice, units) : packPrice),
                       }));
                     }}
                     placeholder="مثال: 5000"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
+                    className="w-full px-3 py-2 bg-indigo-50/50 border border-indigo-200 rounded-xl text-xs font-black text-indigo-950 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر البيع للشريط/الوحدة (د.ع)</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر البيع الفعلي للشريط (د.ع)</label>
                   <input
                     type="number"
                     min="0"
-                    step="250"
+                    step="1"
                     value={quickAddForm.sellingPriceUnit || ''}
                     onChange={(e) =>
                       setQuickAddForm((prev) => ({ ...prev, sellingPriceUnit: Number(e.target.value) || 0 }))
                     }
                     placeholder="مثال: 2500"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
+                    className="w-full px-3 py-2 bg-indigo-50/50 border border-indigo-200 rounded-xl text-xs font-black text-indigo-950 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
                   />
                 </div>
               </div>
@@ -1492,7 +1592,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                   <input
                     type="number"
                     min="0"
-                    step="250"
+                    step="1"
                     value={quickAddForm.purchasePricePack || ''}
                     onChange={(e) =>
                       setQuickAddForm((prev) => ({ ...prev, purchasePricePack: Number(e.target.value) || 0 }))
@@ -1519,29 +1619,57 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">موقع الرف (Shelf)</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    شهر / سنة الصلاحية (1-12 و 20XX)
+                  </label>
+                  <SmartExpiryInput
+                    month={quickAddForm.expiryMonth}
+                    year={quickAddForm.expiryYear}
+                    onChange={(m, y) =>
+                      setQuickAddForm((prev) => ({ ...prev, expiryMonth: m, expiryYear: y }))
+                    }
+                  />
+                </div>
+              </div>
+
+              {/* Toggle Button for Extra Fields (المزيد: موقع الرف والتخزين) */}
+              <button
+                type="button"
+                onClick={() => setShowQuickAddExtras(!showQuickAddExtras)}
+                className={`w-full py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-between border transition-all cursor-pointer ${
+                  showQuickAddExtras || quickAddForm.shelfLocation
+                    ? 'bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>المزيد (موقع الرف والتخزين)</span>
+                  {quickAddForm.shelfLocation && (
+                    <span className="px-1.5 py-0.2 bg-indigo-600 text-white rounded text-[10px] font-bold">
+                      رف: {quickAddForm.shelfLocation}
+                    </span>
+                  )}
+                </span>
+                {showQuickAddExtras ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+              </button>
+
+              {/* Collapsed Shelf Location Section */}
+              {showQuickAddExtras && (
+                <div className="p-3 bg-slate-50 rounded-xl border border-indigo-100">
+                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                    موقع الرف (Shelf Location):
+                  </label>
                   <input
                     type="text"
                     value={quickAddForm.shelfLocation}
                     onChange={(e) => setQuickAddForm((prev) => ({ ...prev, shelfLocation: e.target.value }))}
                     placeholder="مثال: A-04"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:border-indigo-600 focus:outline-hidden"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold font-mono text-slate-900 focus:border-indigo-600 focus:outline-hidden"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  شهر / سنة الصلاحية (1-12 و 20XX)
-                </label>
-                <SmartExpiryInput
-                  month={quickAddForm.expiryMonth}
-                  year={quickAddForm.expiryYear}
-                  onChange={(m, y) =>
-                    setQuickAddForm((prev) => ({ ...prev, expiryMonth: m, expiryYear: y }))
-                  }
-                />
-              </div>
+              )}
 
               <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
                 <button

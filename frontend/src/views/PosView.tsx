@@ -32,6 +32,7 @@ import {
   ChevronDown,
   ChevronUp,
   Camera,
+  Eye,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250, calculateStripPrice } from '../utils/currency';
@@ -210,6 +211,7 @@ export const PosView: React.FC = () => {
   const [shiftCloseNotes, setShiftCloseNotes] = useState('');
   const [closingShift, setClosingShift] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showActualPrices, setShowActualPrices] = useState(false);
 
   const handleCloseShift = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1037,10 +1039,33 @@ export const PosView: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs w-full max-w-full">
         <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
           <h1 className="text-lg sm:text-xl font-black text-slate-900 flex items-center gap-2">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => setShowActualPrices((prev) => !prev)}
+              className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all cursor-pointer active:scale-95 shadow-xs ${
+                showActualPrices
+                  ? 'bg-amber-500 text-white shadow-amber-900/30 ring-2 ring-amber-400 animate-pulse'
+                  : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+              }`}
+              title={
+                showActualPrices
+                  ? 'إخفاء أسعار الصيدلية الفعلية والعودة للتسعيرة الرسمية'
+                  : 'إظهار أسعار الصيدلية الفعلية الخفية'
+              }
+            >
               <ShoppingCart className="w-5 h-5" />
-            </div>
+            </button>
             <span>الكاشير</span>
+            {showActualPrices ? (
+              <span className="px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-black flex items-center gap-1.5 animate-in fade-in">
+                <Eye className="w-3.5 h-3.5 text-amber-700" />
+                <span>أسعار الصيدلية الفعلية (مكشوفة)</span>
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-xl text-xs font-black flex items-center gap-1.5">
+                <span>التسعيرة الرسمية (ظاهرة)</span>
+              </span>
+            )}
           </h1>
 
           {/* Offline / Online Connectivity Indicator */}
@@ -1321,7 +1346,10 @@ export const PosView: React.FC = () => {
                           <Plus className="w-4 h-4 stroke-[3]" />
                           <span>علبة</span>
                           <span className="font-mono font-bold bg-emerald-700/50 px-2 py-0.5 rounded-lg text-emerald-100">
-                            {Number(med.sellingPricePack).toLocaleString()} د.ع
+                            {(showActualPrices
+                              ? Number(med.sellingPricePack)
+                              : (Number((med as any).officialPricePack) || Number(med.sellingPricePack))
+                            ).toLocaleString()} د.ع
                           </span>
                         </button>
 
@@ -1334,7 +1362,10 @@ export const PosView: React.FC = () => {
                             <Layers className="w-4 h-4 stroke-[2.5]" />
                             <span>شريط</span>
                             <span className="font-mono font-bold bg-blue-700/50 px-2 py-0.5 rounded-lg text-blue-100">
-                              {roundTo250(Number(med.sellingPriceUnit) || calculateStripPrice(Number(med.sellingPricePack), med.unitsPerPack)).toLocaleString()} د.ع
+                              {(showActualPrices
+                                ? roundTo250(Number(med.sellingPriceUnit) || calculateStripPrice(Number(med.sellingPricePack), med.unitsPerPack))
+                                : (Number((med as any).officialPriceUnit) || roundTo250(Number(med.sellingPriceUnit) || calculateStripPrice(Number(med.sellingPricePack), med.unitsPerPack)))
+                              ).toLocaleString()} د.ع
                             </span>
                           </button>
                         )}
