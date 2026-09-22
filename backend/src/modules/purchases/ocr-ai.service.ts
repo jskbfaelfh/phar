@@ -590,8 +590,9 @@ export class OcrAiService {
     `;
 
     // Use official active Google Gemini Vision models (starting with fast gemini-2.5-flash)
-    const models = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro', 'gemini-pro-latest'];
+    const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro', 'gemini-pro-latest'];
     let lastError = null;
+    let quotaExceeded = false;
 
     for (const model of models) {
       try {
@@ -625,6 +626,13 @@ export class OcrAiService {
         if (!response.ok) {
           const errData = await response.json().catch(() => null);
           const errMsg = errData?.error?.message || response.statusText;
+          // Detect quota errors — no point trying other models on same key
+          if (response.status === 429 || errMsg?.toLowerCase().includes('quota')) {
+            quotaExceeded = true;
+            lastError = new Error(`[${model}] ${errMsg}`);
+            this.logger.warn(`Quota exceeded for model ${model}, trying next model...`);
+            continue;
+          }
           throw new Error(`[${model}] ${errMsg}`);
         }
 
@@ -638,6 +646,15 @@ export class OcrAiService {
         lastError = err;
         this.logger.warn(`Model ${model} failed, trying next: ${err.message}`);
       }
+    }
+
+    if (quotaExceeded) {
+      throw new Error(
+        '⚠️ انتهت حصة استخدام الذكاء الاصطناعي المجانية لهذا الشهر. يرجى:\n' +
+        '1. الانتظار حتى تجديد الحصة\n' +
+        '2. أو الترقية إلى خطة مدفوعة على https://ai.google.dev\n' +
+        '3. أو إدخال الفاتورة يدوياً'
+      );
     }
 
     throw lastError || new Error('All Gemini Vision models failed to process image');
