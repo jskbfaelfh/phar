@@ -836,15 +836,20 @@ export const PosView: React.FC = () => {
       discountAmount: Number(discountAmount || 0),
       customerName: customerName.trim() || undefined,
       useOfficialPrices: !showActualPrices,
-      items: cart.map((item) => ({
-        inventoryItemId: item.inventoryItemId,
-        inventoryBatchId: item.inventoryBatchId,
-        unitType: item.unitType,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        isCustomPrice: !!item.isCustomPrice,
-        originalUnitPrice: item.originalUnitPrice || item.unitPrice,
-      })),
+      items: cart.map((item) => {
+        const itemPayload: any = {
+          inventoryItemId: item.inventoryItemId,
+          inventoryBatchId: item.inventoryBatchId,
+          unitType: item.unitType,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        };
+        if (item.isCustomPrice) {
+          itemPayload.isCustomPrice = true;
+          itemPayload.originalUnitPrice = item.originalUnitPrice || item.unitPrice;
+        }
+        return itemPayload;
+      }),
     };
 
     // Try online checkout first ONLY if truly online
