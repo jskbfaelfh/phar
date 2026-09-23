@@ -541,7 +541,7 @@ export const PosView: React.FC = () => {
       } catch (err) {
         console.error('Offline search error:', err);
       }
-    }, 150);
+    }, 250);
 
     return () => clearTimeout(timer);
   }, [searchTerm]);

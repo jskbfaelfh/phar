@@ -7,6 +7,7 @@ import { SwitchBranchDto } from '../chain/dto/chain.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { JwtStrategy } from './jwt.strategy';
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
@@ -54,6 +55,7 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   async logout(@Res({ passthrough: true }) res: Response) {
+    JwtStrategy.clearSessionCache();
     res.clearCookie('dawaee_token', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -77,6 +79,7 @@ export class AuthController {
     @Body() body: SwitchBranchDto,
     @Res({ passthrough: true }) res: Response,
   ) {
+    JwtStrategy.clearSessionCache(user?.sub);
     const result = await this.authService.switchBranch(body.targetTenantId, user);
     if (result?.accessToken) {
       res.cookie('dawaee_token', result.accessToken, COOKIE_OPTIONS);
