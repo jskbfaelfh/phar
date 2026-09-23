@@ -6,8 +6,8 @@ export class CreateMedicineDto {
   tradeName: string;
 
   @IsString()
-  @IsNotEmpty({ message: 'الاسم العلمي مطلوب' })
-  scientificName: string;
+  @IsOptional()
+  scientificName?: string;
 
   @IsString()
   @IsOptional()

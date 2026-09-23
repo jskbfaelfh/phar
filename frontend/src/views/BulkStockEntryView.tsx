@@ -702,7 +702,7 @@ export const BulkStockEntryView: React.FC = () => {
           newMedicineData: i.isNewMedicine
             ? {
                 tradeName: i.tradeName,
-                scientificName: i.scientificName,
+                scientificName: i.scientificName?.trim() || undefined,
                 dosageForm: i.dosageForm,
                 strength: i.strength,
                 manufacturer: i.manufacturer,
@@ -717,7 +717,7 @@ export const BulkStockEntryView: React.FC = () => {
           bonusBatchNumber: i.bonusBatchNumber?.trim() || undefined,
           bonusExpiryMonth: i.bonusExpiryMonth ? Number(i.bonusExpiryMonth) : undefined,
           bonusExpiryYear: i.bonusExpiryYear ? Number(i.bonusExpiryYear) : undefined,
-          discountPercent: Number(i.discountPercent || 0),
+          discountPercent: Math.min(100, Math.max(0, Number(i.discountPercent || 0))),
           purchasePricePack: Number(i.purchasePricePack),
           sellingPricePack: Number(i.sellingPricePack),
           sellingPriceUnit: Number(i.sellingPriceUnit),
