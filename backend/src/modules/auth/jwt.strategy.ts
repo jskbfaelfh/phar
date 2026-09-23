@@ -65,7 +65,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     // 1. Super Admin authorization
     if (payload.role === 'SUPER_ADMIN') {
-      return payload;
+      return { ...payload, id: payload.sub };
     }
 
     // 2. Tenant Pharmacy verification
@@ -188,6 +188,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     // Sync role and schema from DB to prevent token privilege tampering, and attach effective subscription status
     return {
       ...payload,
+      id: dbUser.id || payload.sub,
       name: dbUser.name,
       role: dbUser.role,
       schemaName: tenant.schemaName,

@@ -64,7 +64,13 @@ export async function apiRequest<T>(
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    if (response.status === 401 && !endpoint.includes('/auth/')) {
+    const isSensitivePasswordCheck =
+      endpoint.includes('/auth/') ||
+      endpoint.includes('/verify-password') ||
+      endpoint.includes('/shifts/close') ||
+      endpoint.includes('/password');
+
+    if (response.status === 401 && !isSensitivePasswordCheck) {
       clearAuthToken();
       if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
         window.location.href = '/login';

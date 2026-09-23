@@ -1269,9 +1269,10 @@ export class PosService {
       throw new BadRequestException('كلمة سر الحساب مطلوبة لتأكيد إغلاق الوردية');
     }
 
-    const isMatch = await this.verifyUserPassword(user.id, dto.password.trim());
+    const userId = user?.id || user?.sub;
+    const isMatch = await this.verifyUserPassword(userId, dto.password.trim());
     if (!isMatch) {
-      throw new UnauthorizedException('كلمة سر الحساب غير صحيحة، تم رفض إغلاق الوردية');
+      throw new BadRequestException('كلمة سر الحساب غير صحيحة، تم رفض إغلاق الوردية');
     }
 
     // Calculate today's sales and returns for expected cash
@@ -1289,7 +1290,7 @@ export class PosService {
         $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'CLOSED', CURRENT_TIMESTAMP
       ) RETURNING id, opened_at as "openedAt", closed_at as "closedAt";
     `,
-      user.id,
+      userId,
       user.name || 'الكاشير',
       openingCash,
       expectedCash,
@@ -1321,6 +1322,9 @@ export class PosService {
    * Verify current user password against tenant users table
    */
   async verifyUserPassword(userId: string, passwordAttempt: string): Promise<boolean> {
+    if (!userId || !passwordAttempt) {
+      return false;
+    }
     const rawSchema = this.tenantContext.getSchemaName();
     const schemaName = validateAndSanitizeSchemaName(rawSchema);
     const rows: any[] = await this.prisma.$queryRawUnsafe(

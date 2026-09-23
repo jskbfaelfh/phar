@@ -8,6 +8,7 @@ import {
   UseGuards,
   Request,
   ParseUUIDPipe,
+  BadRequestException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -26,11 +27,16 @@ export class PosController {
   }
 
   @Post('sync-offline')
-  async syncOffline(@Body() dto: SyncOfflineSalesDto) {
+  async syncOfflineSales(@Body() dto: SyncOfflineSalesDto) {
     return this.posService.syncOfflineSales(dto);
   }
 
-  @Post(['return', 'returns'])
+  @Post('return')
+  async processReturnLegacy(@Body() dto: CreateReturnDto) {
+    return this.posService.processReturn(dto);
+  }
+
+  @Post('returns')
   async processReturn(@Body() dto: CreateReturnDto) {
     return this.posService.processReturn(dto);
   }
@@ -46,7 +52,7 @@ export class PosController {
   }
 
   @Get('sales')
-  async getSalesHistory(@Query() query: { limit?: number; search?: string }) {
+  async getSalesHistory(@Query() query: any) {
     return this.posService.getSalesHistory(query);
   }
 
@@ -57,9 +63,10 @@ export class PosController {
 
   @Post('verify-password')
   async verifyPassword(@Request() req: any, @Body() dto: VerifyPasswordDto) {
-    const isMatch = await this.posService.verifyUserPassword(req.user.id, dto.password);
+    const userId = req.user?.id || req.user?.sub;
+    const isMatch = await this.posService.verifyUserPassword(userId, dto.password);
     if (!isMatch) {
-      throw new UnauthorizedException('كلمة المرور غير صحيحة');
+      throw new BadRequestException('كلمة المرور غير صحيحة');
     }
     return { success: true, verified: true, message: 'تم التحقق من كلمة المرور بنجاح' };
   }
