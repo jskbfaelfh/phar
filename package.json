@@ -1,0 +1,10 @@
+{
+  "name": "dawaee-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix backend run build",
+    "start:prod": "npm --prefix backend run start:prod",
+    "start": "npm --prefix backend run start:prod"
+  }
+}
