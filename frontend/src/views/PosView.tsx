@@ -31,6 +31,7 @@ import {
   ChevronDown,
   ChevronUp,
   Camera,
+  MoreVertical,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250, calculateStripPrice } from '../utils/currency';
@@ -242,6 +243,24 @@ export const PosView: React.FC = () => {
   const [editingPriceIndex, setEditingPriceIndex] = useState<number | null>(null);
   const [editingPriceValue, setEditingPriceValue] = useState<number | ''>('');
   const [editingPriceError, setEditingPriceError] = useState<string>('');
+
+  // Dropdown menu state for "المزيد" (Sales History, Daily Summary, Shift Close)
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setShowMoreMenu(false);
+      }
+    };
+    if (showMoreMenu) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [showMoreMenu]);
 
   // Cashier Account Password Lock & Prompt State (for Sales History & Daily Summary)
   const [showPasswordPromptModal, setShowPasswordPromptModal] = useState(false);
@@ -1257,16 +1276,6 @@ export const PosView: React.FC = () => {
           </button>
 
           <button
-            onClick={() => requestCashierPassword('SALES_HISTORY')}
-            className="flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-black text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
-            title="استعراض والبحث في جميع الفواتير السابقة والزبائن (مقفل بكلمة سر الكاشير)"
-          >
-            <Lock className="w-3.5 h-3.5 text-indigo-600" />
-            <FileText className="w-4 h-4 text-indigo-600" />
-            <span>سجل الفواتير 📄</span>
-          </button>
-
-          <button
             onClick={() => setShowReturnModal(true)}
             className="flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-black text-amber-900 bg-amber-50 hover:bg-amber-100 rounded-xl border border-amber-300 transition-all cursor-pointer active:scale-95 shadow-2xs"
             title="إرجاع مباشر سريع بدون فاتورة (F4)"
@@ -1275,27 +1284,72 @@ export const PosView: React.FC = () => {
             <span>إرجاع سريع (F4)</span>
           </button>
 
-          <button
-            onClick={() => requestCashierPassword('DAILY_SUMMARY')}
-            className="flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-black text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-300 transition-all cursor-pointer active:scale-95"
-            title="ملخص الوردية ونقد الدرج (مقفل بكلمة سر الكاشير)"
-          >
-            <Lock className="w-3.5 h-3.5 text-slate-500" />
-            <DollarSign className="w-4 h-4" />
-            <span>اليومية</span>
-          </button>
+          {/* قائمة المزيد */}
+          <div className="relative" ref={moreMenuRef}>
+            <button
+              onClick={() => setShowMoreMenu((prev) => !prev)}
+              className="flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-black text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-300 transition-all cursor-pointer active:scale-95 shadow-2xs"
+              title="المزيد من الخيارات والإجراءات"
+            >
+              <MoreVertical className="w-4 h-4 text-slate-600" />
+              <span>المزيد</span>
+              <ChevronDown className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-200 ${showMoreMenu ? 'rotate-180' : ''}`} />
+            </button>
 
-          <button
-            onClick={async () => {
-              await fetchShiftSummary();
-              setShowShiftCloseModal(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-black text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl border border-rose-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
-            title="إغلاق وردية الكاشير ومطابقة نقد الدرج"
-          >
-            <Lock className="w-4 h-4" />
-            <span>إغلاق الوردية</span>
-          </button>
+            {showMoreMenu && (
+              <div className="absolute left-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-100">
+                <div className="p-1 space-y-0.5">
+                  {/* سجل الفواتير */}
+                  <button
+                    onClick={() => {
+                      setShowMoreMenu(false);
+                      requestCashierPassword('SALES_HISTORY');
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:text-indigo-900 hover:bg-indigo-50 rounded-xl transition-colors cursor-pointer text-right"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <FileText className="w-4 h-4 text-indigo-600" />
+                      <span>سجل الفواتير 📄</span>
+                    </div>
+                    <Lock className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+
+                  {/* اليومية */}
+                  <button
+                    onClick={() => {
+                      setShowMoreMenu(false);
+                      requestCashierPassword('DAILY_SUMMARY');
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:text-emerald-900 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer text-right"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <DollarSign className="w-4 h-4 text-emerald-600" />
+                      <span>اليومية 💵</span>
+                    </div>
+                    <Lock className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+                </div>
+
+                <div className="p-1">
+                  {/* إغلاق الوردية */}
+                  <button
+                    onClick={async () => {
+                      setShowMoreMenu(false);
+                      await fetchShiftSummary();
+                      setShowShiftCloseModal(true);
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-xs sm:text-sm font-bold text-rose-700 hover:text-rose-900 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer text-right"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Lock className="w-4 h-4 text-rose-600" />
+                      <span>إغلاق الوردية</span>
+                    </div>
+                    <span className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-md font-semibold">مطابقة</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
