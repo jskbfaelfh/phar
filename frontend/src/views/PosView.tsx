@@ -1486,6 +1486,8 @@ export const PosView: React.FC = () => {
               searchResults.map((med) => {
                 const hasMultipleBatches = med.activeBatches && med.activeBatches.length > 1;
                 const isExactBarcode = (med.barcode || '').trim().toLowerCase() === searchTerm.trim().toLowerCase();
+                const purchasePack = Number(med.purchasePricePack || med.activeBatches?.[0]?.purchasePricePack || 0);
+                const purchaseStrip = med.unitsPerPack > 1 && purchasePack > 0 ? roundTo250(purchasePack / med.unitsPerPack) : purchasePack;
 
                 return (
                   <div key={med.id} className={`p-3 sm:p-4 rounded-2xl transition-all border-b border-slate-100 last:border-0 ${isExactBarcode ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-400' : 'hover:bg-slate-50/90'}`}>
@@ -1505,6 +1507,29 @@ export const PosView: React.FC = () => {
                           {med.shelfLocation && (
                             <span className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-300 rounded-xl text-xs font-black font-mono shadow-2xs">
                               📍 الرف: {med.shelfLocation}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* بطاقة سعر الشراء للعلبة والشريط */}
+                        <div className="flex items-center gap-2 mt-2 flex-wrap">
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50/90 text-amber-950 border border-amber-200 rounded-xl text-xs font-bold shadow-2xs">
+                            <span className="text-amber-700 font-medium">سعر الشراء:</span>
+                            <span className="font-mono font-black text-amber-950">
+                              {purchasePack > 0 ? `${purchasePack.toLocaleString()} د.ع / علبة` : 'غير مسجل'}
+                            </span>
+                            {med.unitsPerPack > 1 && purchasePack > 0 && (
+                              <>
+                                <span className="text-amber-300 font-bold">•</span>
+                                <span className="font-mono font-black text-amber-800">
+                                  {purchaseStrip.toLocaleString()} د.ع / شريط
+                                </span>
+                              </>
+                            )}
+                          </div>
+                          {med.scientificName && (
+                            <span className="text-xs text-slate-400 font-medium truncate max-w-[240px]" title={med.scientificName}>
+                              {med.scientificName}
                             </span>
                           )}
                         </div>
