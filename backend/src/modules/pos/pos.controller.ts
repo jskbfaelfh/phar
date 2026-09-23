@@ -8,10 +8,11 @@ import {
   UseGuards,
   Request,
   ParseUUIDPipe,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { PosService } from './pos.service';
-import { CheckoutDto, CreateReturnDto, SyncOfflineSalesDto } from './dto/create-sale.dto';
+import { CheckoutDto, CreateReturnDto, SyncOfflineSalesDto, CloseShiftDto, VerifyPasswordDto } from './dto/create-sale.dto';
 import { SubscriptionGuard } from '../../common/guards/subscription.guard';
 
 @Controller('pos')
@@ -54,8 +55,17 @@ export class PosController {
     return this.posService.getSaleById(id);
   }
 
+  @Post('verify-password')
+  async verifyPassword(@Request() req: any, @Body() dto: VerifyPasswordDto) {
+    const isMatch = await this.posService.verifyUserPassword(req.user.id, dto.password);
+    if (!isMatch) {
+      throw new UnauthorizedException('كلمة المرور غير صحيحة');
+    }
+    return { success: true, verified: true, message: 'تم التحقق من كلمة المرور بنجاح' };
+  }
+
   @Post('shifts/close')
-  async closeShift(@Request() req: any, @Body() dto: { actualCash: number; openingCash?: number; notes?: string }) {
+  async closeShift(@Request() req: any, @Body() dto: CloseShiftDto) {
     return this.posService.closeShiftHandover(req.user, dto);
   }
 

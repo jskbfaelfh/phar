@@ -3,13 +3,15 @@ import {
   BadRequestException,
   NotFoundException,
   ForbiddenException,
+  UnauthorizedException,
   Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../database/prisma.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import { CheckoutDto, CreateReturnDto, SyncOfflineSalesDto, UnitTypeEnum, ItemConditionEnum } from './dto/create-sale.dto';
+import { CheckoutDto, CreateReturnDto, SyncOfflineSalesDto, UnitTypeEnum, ItemConditionEnum, CloseShiftDto } from './dto/create-sale.dto';
 import { validateAndSanitizeSchemaName } from '../../common/utils/security.util';
 import { AuditLogService } from '../audit/audit.service';
 import { AuditAction, AuditEntityType } from '../audit/dto/audit-log.dto';
@@ -53,6 +55,9 @@ export class PosService {
           ALTER TABLE "${schemaName}".sale_items ADD COLUMN IF NOT EXISTS cost_price_pack DECIMAL(12, 2) DEFAULT 0;
           ALTER TABLE "${schemaName}".sale_items ADD COLUMN IF NOT EXISTS cost_price_unit DECIMAL(12, 2) DEFAULT 0;
           ALTER TABLE "${schemaName}".sale_items ADD COLUMN IF NOT EXISTS total_cost DECIMAL(12, 2) DEFAULT 0;
+          ALTER TABLE "${schemaName}".sale_items ADD COLUMN IF NOT EXISTS is_custom_price BOOLEAN DEFAULT FALSE;
+          ALTER TABLE "${schemaName}".sale_items ADD COLUMN IF NOT EXISTS original_unit_price DECIMAL(12, 2);
+          ALTER TABLE "${schemaName}".shift_logs ADD COLUMN IF NOT EXISTS custom_price_items_count INT DEFAULT 0;
         END $$;
       `);
       PosService.verifiedSaleSchemas.add(schemaName);
@@ -270,15 +275,29 @@ export class PosService {
                     const batchUnitPrice = targetBatch.selling_price_unit != null ? Number(targetBatch.selling_price_unit) : defaultUnitPrice;
 
                     const allocatedQty = isPack ? Math.round((unitsToTake / unitsPerPack) * 100) / 100 : unitsToTake;
+                    const defaultBatchPrice = isOfficialPricing ? (isPack ? officialPackPrice : officialUnitPrice) : (isPack ? batchPackPrice : batchUnitPrice);
                     const priceApplied = item.unitPrice !== undefined && Number(item.unitPrice) >= 0
                       ? Number(item.unitPrice)
                       : (alloc.unitPrice !== undefined && Number(alloc.unitPrice) >= 0
                           ? Number(alloc.unitPrice)
-                          : (isOfficialPricing ? (isPack ? officialPackPrice : officialUnitPrice) : (isPack ? batchPackPrice : batchUnitPrice)));
+                          : defaultBatchPrice);
                     const lineTotal = priceApplied * allocatedQty;
 
                     const costPricePack = Number(targetBatch.purchase_price_pack) || 0;
                     const costPriceUnit = unitsPerPack > 0 ? costPricePack / unitsPerPack : costPricePack;
+                    const costPrice = isPack ? costPricePack : costPriceUnit;
+
+                    // Enforce minimum price rule (Cost * 1.2) if cost price is defined
+                    if (costPrice > 0 && priceApplied < Math.round(costPrice * 1.2)) {
+                      const itemName = invItem.custom_name || invItem.trade_name || 'الدواء';
+                      throw new BadRequestException(
+                        `سعر البيع لدواء (${itemName}) لا يمكن أن يقل عن ${Math.round(costPrice * 1.2).toLocaleString()} د.ع (سعر الشراء × 1.2 كحد أدنى لمنع الخسارة)`,
+                      );
+                    }
+
+                    const isCustomPrice = item.isCustomPrice === true || (item.originalUnitPrice !== undefined && Number(priceApplied) !== Number(item.originalUnitPrice));
+                    const originalUnitPrice = item.originalUnitPrice !== undefined ? Number(item.originalUnitPrice) : defaultBatchPrice;
+
                     const lineCost = isPack ? costPricePack * allocatedQty : costPriceUnit * allocatedQty;
 
                     subtotal += lineTotal;
@@ -295,6 +314,8 @@ export class PosService {
                       costPricePack,
                       costPriceUnit,
                       totalCost: lineCost,
+                      isCustomPrice,
+                      originalUnitPrice,
                     });
                   }
                 }
@@ -334,13 +355,27 @@ export class PosService {
                     const batchUnitPrice = batch.selling_price_unit != null ? Number(batch.selling_price_unit) : defaultUnitPrice;
 
                     const allocatedQty = isPack ? Math.round((deductionFromThisBatch / unitsPerPack) * 100) / 100 : deductionFromThisBatch;
+                    const defaultBatchPrice = isOfficialPricing ? (isPack ? officialPackPrice : officialUnitPrice) : (isPack ? batchPackPrice : batchUnitPrice);
                     const priceApplied = item.unitPrice !== undefined && Number(item.unitPrice) >= 0
                       ? Number(item.unitPrice)
-                      : (isOfficialPricing ? (isPack ? officialPackPrice : officialUnitPrice) : (isPack ? batchPackPrice : batchUnitPrice));
+                      : defaultBatchPrice;
                     const lineTotal = priceApplied * allocatedQty;
 
                     const costPricePack = Number(batch.purchase_price_pack) || 0;
                     const costPriceUnit = unitsPerPack > 0 ? costPricePack / unitsPerPack : costPricePack;
+                    const costPrice = isPack ? costPricePack : costPriceUnit;
+
+                    // Enforce minimum price rule (Cost * 1.2) if cost price is defined
+                    if (costPrice > 0 && priceApplied < Math.round(costPrice * 1.2)) {
+                      const itemName = invItem.custom_name || invItem.trade_name || 'الدواء';
+                      throw new BadRequestException(
+                        `سعر البيع لدواء (${itemName}) لا يمكن أن يقل عن ${Math.round(costPrice * 1.2).toLocaleString()} د.ع (سعر الشراء × 1.2 كحد أدنى لمنع الخسارة)`,
+                      );
+                    }
+
+                    const isCustomPrice = item.isCustomPrice === true || (item.originalUnitPrice !== undefined && Number(priceApplied) !== Number(item.originalUnitPrice));
+                    const originalUnitPrice = item.originalUnitPrice !== undefined ? Number(item.originalUnitPrice) : defaultBatchPrice;
+
                     const lineCost = isPack ? costPricePack * allocatedQty : costPriceUnit * allocatedQty;
 
                     subtotal += lineTotal;
@@ -357,6 +392,8 @@ export class PosService {
                       costPricePack,
                       costPriceUnit,
                       totalCost: lineCost,
+                      isCustomPrice,
+                      originalUnitPrice,
                     });
                   }
                 }
@@ -399,8 +436,8 @@ export class PosService {
             for (const line of lineItemsToInsert) {
               await tx.$executeRawUnsafe(
                 `INSERT INTO "${schemaName}".sale_items 
-                 (id, sale_id, inventory_item_id, inventory_batch_id, unit_type, quantity, unit_price, total_price, cost_price_pack, cost_price_unit, total_cost) 
-                 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, $11)`,
+                 (id, sale_id, inventory_item_id, inventory_batch_id, unit_type, quantity, unit_price, total_price, cost_price_pack, cost_price_unit, total_cost, is_custom_price, original_unit_price) 
+                 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
                 line.id,
                 line.saleId,
                 line.inventoryItemId,
@@ -412,6 +449,8 @@ export class PosService {
                 line.costPricePack || 0,
                 line.costPriceUnit || 0,
                 line.totalCost || 0,
+                line.isCustomPrice || false,
+                line.originalUnitPrice || line.unitPrice,
               );
             }
 
@@ -1107,7 +1146,11 @@ export class PosService {
    * Get Cashier Daily Shift Summary (Sales, Refunds, Cash in Drawer)
    */
   async getDailySummary() {
-    const schemaName = this.tenantContext.getSchemaName();
+    const rawSchema = this.tenantContext.getSchemaName();
+    const schemaName = validateAndSanitizeSchemaName(rawSchema);
+
+    await this.ensureSaleColumnsExist(schemaName);
+    await this.ensureReturnColumnsExist(schemaName);
 
     // Today's Sales
     const salesSummary: any[] = await this.prisma.$queryRawUnsafe(
@@ -1129,8 +1172,17 @@ export class PosService {
        WHERE created_at >= CURRENT_DATE`,
     );
 
+    // Today's Custom Priced Items Count
+    const customItemsRow: any[] = await this.prisma.$queryRawUnsafe(
+      `SELECT COUNT(si.id)::int as "count" 
+       FROM "${schemaName}".sale_items si
+       JOIN "${schemaName}".sales s ON si.sale_id = s.id
+       WHERE s.created_at >= CURRENT_DATE AND si.is_custom_price IS TRUE`,
+    );
+
     const s = salesSummary[0];
     const r = returnsSummary[0];
+    const customPriceItemsCount = Number(customItemsRow[0]?.count || 0);
 
     const netCashInDrawer = Number(s.totalSalesRevenue) - Number(r.totalRefunds);
 
@@ -1141,6 +1193,7 @@ export class PosService {
       totalDiscounts: Number(s.totalDiscounts),
       totalReturnsCount: r.totalReturnsCount,
       totalRefunds: Number(r.totalRefunds),
+      customPriceItemsCount,
       netCashInDrawer,
     };
   }
@@ -1149,7 +1202,10 @@ export class PosService {
    * Get Sales History with pagination and search
    */
   async getSalesHistory(query?: { limit?: number; search?: string }) {
-    const schemaName = this.tenantContext.getSchemaName();
+    const rawSchema = this.tenantContext.getSchemaName();
+    const schemaName = validateAndSanitizeSchemaName(rawSchema);
+
+    await this.ensureSaleColumnsExist(schemaName);
     const limit = Math.min(Number(query?.limit || 50), 100);
 
     let searchFilter = '';
@@ -1179,7 +1235,9 @@ export class PosService {
                 'unitType', si.unit_type,
                 'quantity', si.quantity,
                 'unitPrice', si.unit_price,
-                'totalPrice', si.total_price
+                'totalPrice', si.total_price,
+                'isCustomPrice', COALESCE(si.is_custom_price, FALSE),
+                'originalUnitPrice', si.original_unit_price
               ) ORDER BY si.unit_price DESC
             )
             FROM "${schemaName}".sale_items si
@@ -1201,10 +1259,20 @@ export class PosService {
   }
 
   /**
-   * Close Shift Handover with cash reconciliation
+   * Close Shift Handover with cash reconciliation and password authentication
    */
-  async closeShiftHandover(user: any, dto: { actualCash: number; openingCash?: number; notes?: string }) {
-    const schemaName = this.tenantContext.getSchemaName();
+  async closeShiftHandover(user: any, dto: CloseShiftDto) {
+    const rawSchema = this.tenantContext.getSchemaName();
+    const schemaName = validateAndSanitizeSchemaName(rawSchema);
+
+    if (!dto.password || !dto.password.trim()) {
+      throw new BadRequestException('كلمة سر الحساب مطلوبة لتأكيد إغلاق الوردية');
+    }
+
+    const isMatch = await this.verifyUserPassword(user.id, dto.password.trim());
+    if (!isMatch) {
+      throw new UnauthorizedException('كلمة سر الحساب غير صحيحة، تم رفض إغلاق الوردية');
+    }
 
     // Calculate today's sales and returns for expected cash
     const summary = await this.getDailySummary();
@@ -1216,9 +1284,9 @@ export class PosService {
     const result: any[] = await this.prisma.$queryRawUnsafe(`
       INSERT INTO "${schemaName}".shift_logs (
         user_id, user_name, opening_cash, expected_cash, actual_cash, cash_difference,
-        total_sales_count, total_sales_amount, notes, status, closed_at
+        total_sales_count, total_sales_amount, custom_price_items_count, notes, status, closed_at
       ) VALUES (
-        $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, 'CLOSED', CURRENT_TIMESTAMP
+        $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'CLOSED', CURRENT_TIMESTAMP
       ) RETURNING id, opened_at as "openedAt", closed_at as "closedAt";
     `,
       user.id,
@@ -1229,6 +1297,7 @@ export class PosService {
       cashDifference,
       summary.totalInvoices,
       summary.totalSalesRevenue,
+      summary.customPriceItemsCount,
       dto.notes || null
     );
 
@@ -1243,8 +1312,25 @@ export class PosService {
       cashDifference,
       totalSalesCount: summary.totalInvoices,
       totalSalesAmount: summary.totalSalesRevenue,
+      customPriceItemsCount: summary.customPriceItemsCount,
       netCashInDrawer: summary.netCashInDrawer,
     };
+  }
+
+  /**
+   * Verify current user password against tenant users table
+   */
+  async verifyUserPassword(userId: string, passwordAttempt: string): Promise<boolean> {
+    const rawSchema = this.tenantContext.getSchemaName();
+    const schemaName = validateAndSanitizeSchemaName(rawSchema);
+    const rows: any[] = await this.prisma.$queryRawUnsafe(
+      `SELECT password_hash FROM "${schemaName}".users WHERE id = $1::uuid LIMIT 1`,
+      userId,
+    );
+    if (!rows || rows.length === 0 || !rows[0].password_hash) {
+      return false;
+    }
+    return bcrypt.compare(passwordAttempt, rows[0].password_hash);
   }
 
   /**

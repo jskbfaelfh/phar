@@ -42,6 +42,15 @@ export class CartItemDto {
   @IsOptional()
   @Min(0)
   unitPrice?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  isCustomPrice?: boolean;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  originalUnitPrice?: number;
 }
 
 export class OfflineBatchAllocationDto {
@@ -209,4 +218,28 @@ export class SyncOfflineSalesDto {
   @ValidateNested({ each: true })
   @Type(() => OfflineSaleItemDto)
   sales: OfflineSaleItemDto[];
+}
+
+export class CloseShiftDto {
+  @IsNumber({}, { message: 'المبلغ الفعلي للنقد يجب أن يكون رقماً' })
+  actualCash: number;
+
+  @IsNumber({}, { message: 'المبلغ الافتتاحي يجب أن يكون رقماً' })
+  @IsOptional()
+  openingCash?: number;
+
+  @IsString({ message: 'الملاحظات يجب أن تكون نصاً' })
+  @IsOptional()
+  @MaxLength(500)
+  notes?: string;
+
+  @IsString({ message: 'كلمة سر الحساب مطلوبة لتأكيد إغلاق الوردية' })
+  @IsNotEmpty({ message: 'كلمة سر الحساب مطلوبة لتأكيد إغلاق الوردية' })
+  password: string;
+}
+
+export class VerifyPasswordDto {
+  @IsString({ message: 'كلمة المرور مطلوبة' })
+  @IsNotEmpty({ message: 'كلمة المرور مطلوبة' })
+  password: string;
 }

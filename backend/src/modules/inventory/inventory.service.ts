@@ -942,6 +942,23 @@ export class InventoryService {
            LIMIT 1), 
           i.selling_price_unit
         ) as "sellingPriceUnit",
+        COALESCE(
+          (SELECT b_sub.purchase_price_pack 
+           FROM "${schemaName}".inventory_batches b_sub 
+           WHERE b_sub.inventory_item_id = i.id 
+             AND b_sub.quantity_units_remaining > 0 
+             AND b_sub.expiry_date >= CURRENT_DATE 
+             AND (b_sub.is_recalled IS FALSE OR b_sub.is_recalled IS NULL)
+             AND b_sub.purchase_price_pack IS NOT NULL
+           ORDER BY b_sub.expiry_date ASC, b_sub.created_at ASC 
+           LIMIT 1),
+          (SELECT b_last.purchase_price_pack 
+           FROM "${schemaName}".inventory_batches b_last 
+           WHERE b_last.inventory_item_id = i.id 
+           ORDER BY b_last.created_at DESC 
+           LIMIT 1),
+          0
+        )::numeric as "purchasePricePack",
         COALESCE(i.official_price_pack, i.selling_price_pack, 0)::numeric as "officialPricePack",
         COALESCE(i.official_price_unit, i.selling_price_unit, 0)::numeric as "officialPriceUnit",
         i.min_alert_units as "minAlertUnits",

@@ -70,6 +70,7 @@ interface SearchMedicine {
   sellingPriceUnit: number;
   officialPricePack?: number;
   officialPriceUnit?: number;
+  purchasePricePack?: number;
   availablePacks: number;
   availableStrips: number;
   totalUnitsRemaining: number;
@@ -108,6 +109,10 @@ interface CartItem {
   officialPriceUnit?: number;
   actualPricePack?: number;
   actualPriceUnit?: number;
+  purchasePricePack?: number;
+  purchasePriceUnit?: number;
+  isCustomPrice?: boolean;
+  originalUnitPrice?: number;
   breakdown?: BatchPortion[];
 }
 
@@ -203,6 +208,15 @@ function calculateDynamicItemTotals(
   return { totalPrice: finalTotal, effectiveUnitPrice, breakdown };
 }
 
+function getMinAllowedPrice(item: CartItem): { costPrice: number; minPrice: number } {
+  const isPack = item.unitType === 'PACK';
+  const unitsPerPk = Number(item.unitsPerPack) || 1;
+  const packCost = Number(item.purchasePricePack || 0);
+  const costPrice = isPack ? packCost : (item.purchasePriceUnit || (unitsPerPk > 1 ? packCost / unitsPerPk : packCost));
+  const minPrice = costPrice > 0 ? Math.round(costPrice * 1.2) : 0;
+  return { costPrice: Math.round(costPrice), minPrice };
+}
+
 export const PosView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<SearchMedicine[]>([]);
@@ -219,12 +233,66 @@ export const PosView: React.FC = () => {
   const [actualCashInput, setActualCashInput] = useState<number | ''>('');
   const [openingCashInput, setOpeningCashInput] = useState<number | ''>('');
   const [shiftCloseNotes, setShiftCloseNotes] = useState('');
+  const [shiftClosePassword, setShiftClosePassword] = useState('');
   const [closingShift, setClosingShift] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showActualPrices, setShowActualPrices] = useState(false);
 
+  // Cart Custom Price Editing State
+  const [editingPriceIndex, setEditingPriceIndex] = useState<number | null>(null);
+  const [editingPriceValue, setEditingPriceValue] = useState<number | ''>('');
+  const [editingPriceError, setEditingPriceError] = useState<string>('');
+
+  // Cashier Account Password Lock & Prompt State (for Sales History & Daily Summary)
+  const [showPasswordPromptModal, setShowPasswordPromptModal] = useState(false);
+  const [passwordPromptAction, setPasswordPromptAction] = useState<'SALES_HISTORY' | 'DAILY_SUMMARY' | null>(null);
+  const [cashierPasswordInput, setCashierPasswordInput] = useState('');
+  const [passwordPromptError, setPasswordPromptError] = useState('');
+  const [verifyingCashierPassword, setVerifyingCashierPassword] = useState(false);
+
+  const requestCashierPassword = (action: 'SALES_HISTORY' | 'DAILY_SUMMARY') => {
+    setPasswordPromptAction(action);
+    setCashierPasswordInput('');
+    setPasswordPromptError('');
+    setShowPasswordPromptModal(true);
+  };
+
+  const handleVerifyPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cashierPasswordInput) {
+      setPasswordPromptError('يرجى إدخال كلمة المرور');
+      return;
+    }
+    setVerifyingCashierPassword(true);
+    setPasswordPromptError('');
+    try {
+      await apiRequest('/pos/verify-password', {
+        method: 'POST',
+        body: JSON.stringify({ password: cashierPasswordInput }),
+      });
+      setShowPasswordPromptModal(false);
+      const action = passwordPromptAction;
+      setPasswordPromptAction(null);
+      setCashierPasswordInput('');
+      if (action === 'SALES_HISTORY') {
+        setShowSalesHistoryModal(true);
+        fetchSalesHistory();
+      } else if (action === 'DAILY_SUMMARY') {
+        fetchShiftSummary();
+      }
+    } catch (err: any) {
+      setPasswordPromptError(err.message || 'كلمة المرور غير صحيحة');
+    } finally {
+      setVerifyingCashierPassword(false);
+    }
+  };
+
   const handleCloseShift = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!shiftClosePassword) {
+      alert('يرجى إدخال كلمة سر حساب الكاشير لتأكيد إغلاق الوردية');
+      return;
+    }
     setClosingShift(true);
     try {
       const res = await apiRequest<any>('/pos/shifts/close', {
@@ -233,6 +301,7 @@ export const PosView: React.FC = () => {
           actualCash: Number(actualCashInput) || 0,
           openingCash: Number(openingCashInput) || 0,
           notes: shiftCloseNotes.trim() || undefined,
+          password: shiftClosePassword,
         }),
       });
       setMessage({ type: 'success', text: res.message || 'تم إغلاق الوردية بنجاح' });
@@ -240,6 +309,7 @@ export const PosView: React.FC = () => {
       setActualCashInput('');
       setOpeningCashInput('');
       setShiftCloseNotes('');
+      setShiftClosePassword('');
     } catch (err: any) {
       alert(err.message || 'فشل إغلاق الوردية');
     } finally {
@@ -531,6 +601,16 @@ export const PosView: React.FC = () => {
           return prev;
         }
 
+        if (current.isCustomPrice) {
+          const updated = [...prev];
+          updated[existingIndex] = {
+            ...current,
+            quantity: newQty,
+            totalPrice: roundTo250(current.unitPrice * newQty),
+          };
+          return updated;
+        }
+
         const effectivePack = isOfficial
           ? (current.officialPricePack || current.defaultSellingPricePack)
           : (current.actualPricePack || current.defaultSellingPricePack);
@@ -571,6 +651,9 @@ export const PosView: React.FC = () => {
         isOfficial,
       );
 
+      const purchasePack = Number(med.purchasePricePack || med.activeBatches?.[0]?.purchasePricePack || 0);
+      const purchaseUnit = med.unitsPerPack > 1 ? roundTo250(purchasePack / med.unitsPerPack) : purchasePack;
+
       return [
         ...prev,
         {
@@ -593,6 +676,10 @@ export const PosView: React.FC = () => {
           officialPriceUnit: officialUnit,
           actualPricePack: actualPack,
           actualPriceUnit: actualUnit,
+          purchasePricePack: purchasePack,
+          purchasePriceUnit: purchaseUnit,
+          isCustomPrice: false,
+          originalUnitPrice: effectiveUnitPrice,
           breakdown,
         },
       ];
@@ -621,6 +708,16 @@ export const PosView: React.FC = () => {
           alert(`الكمية المطلوبة تتجاوز الرصيد المتوفر في المخزن (${totalUnitsAvail} وحدة).`);
           return prev;
         }
+      }
+
+      if (item.isCustomPrice) {
+        const updated = [...prev];
+        updated[index] = {
+          ...item,
+          quantity: newQty,
+          totalPrice: roundTo250(item.unitPrice * newQty),
+        };
+        return updated;
       }
 
       const isOfficial = !showActualPrices;
@@ -661,6 +758,10 @@ export const PosView: React.FC = () => {
 
       setCart((prevCart) =>
         prevCart.map((item) => {
+          if (item.isCustomPrice) {
+            return item;
+          }
+
           const effectivePack = isOfficial
             ? (item.officialPricePack || item.defaultSellingPricePack)
             : (item.actualPricePack || item.defaultSellingPricePack);
@@ -722,6 +823,8 @@ export const PosView: React.FC = () => {
         unitType: item.unitType,
         quantity: item.quantity,
         unitPrice: item.unitPrice,
+        isCustomPrice: !!item.isCustomPrice,
+        originalUnitPrice: item.originalUnitPrice || item.unitPrice,
       })),
     };
 
@@ -787,6 +890,8 @@ export const PosView: React.FC = () => {
         unitPrice: it.unitPrice,
         totalPrice: it.totalPrice,
         batchNumber: it.batchNumber,
+        isCustomPrice: !!it.isCustomPrice,
+        originalUnitPrice: it.originalUnitPrice || it.unitPrice,
       }));
 
       // Build explicit batch allocations from cart breakdown
@@ -1152,13 +1257,11 @@ export const PosView: React.FC = () => {
           </button>
 
           <button
-            onClick={() => {
-              setShowSalesHistoryModal(true);
-              fetchSalesHistory();
-            }}
+            onClick={() => requestCashierPassword('SALES_HISTORY')}
             className="flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-black text-indigo-900 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
-            title="استعراض والبحث في جميع الفواتير السابقة والزبائن"
+            title="استعراض والبحث في جميع الفواتير السابقة والزبائن (مقفل بكلمة سر الكاشير)"
           >
+            <Lock className="w-3.5 h-3.5 text-indigo-600" />
             <FileText className="w-4 h-4 text-indigo-600" />
             <span>سجل الفواتير 📄</span>
           </button>
@@ -1173,9 +1276,11 @@ export const PosView: React.FC = () => {
           </button>
 
           <button
-            onClick={fetchShiftSummary}
+            onClick={() => requestCashierPassword('DAILY_SUMMARY')}
             className="flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-black text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-300 transition-all cursor-pointer active:scale-95"
+            title="ملخص الوردية ونقد الدرج (مقفل بكلمة سر الكاشير)"
           >
+            <Lock className="w-3.5 h-3.5 text-slate-500" />
             <DollarSign className="w-4 h-4" />
             <span>اليومية</span>
           </button>
@@ -1471,76 +1576,248 @@ export const PosView: React.FC = () => {
                 <p className="text-xs text-slate-400 mt-1">اختر أدوية من القائمة للبدء بالبيع</p>
               </div>
             ) : (
-              cart.map((item, idx) => (
-                <div key={`${item.inventoryItemId}-${item.unitType}-${item.inventoryBatchId || ''}`} className="py-2.5 sm:py-3 flex items-center justify-between gap-2.5">
-                  <div className="flex-1 min-w-0">
-                    <div className="font-black text-slate-900 text-sm sm:text-base truncate">
-                      {item.tradeName}
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-slate-600 mt-1 flex-wrap">
-                      <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black shadow-2xs ${item.unitType === 'PACK' ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-blue-100 text-blue-900 border border-blue-300'}`}>
-                        {item.unitType === 'PACK' ? 'علبة' : 'شريط'}
-                      </span>
-                      {item.breakdown && item.breakdown.length > 1 ? (
-                        <div className="flex items-center gap-1 flex-wrap">
-                          {item.breakdown.map((b, bi) => (
-                            <span key={bi} className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded-lg border border-slate-300 text-xs font-mono font-bold">
-                              {b.qty} × {roundTo250(Number(b.unitPrice)).toLocaleString()} د.ع
-                            </span>
-                          ))}
+              cart.map((item, idx) => {
+                const { costPrice, minPrice } = getMinAllowedPrice(item);
+                const isEditingThisPrice = editingPriceIndex === idx;
+
+                return (
+                  <div key={`${item.inventoryItemId}-${item.unitType}-${item.inventoryBatchId || ''}`} className="py-2.5 sm:py-3 flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-2.5">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-black text-slate-900 text-sm sm:text-base truncate">
+                          {item.tradeName}
                         </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono font-bold text-slate-700">{roundTo250(item.unitPrice).toLocaleString()} د.ع</span>
-                          {showActualPrices ? (
-                            <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded font-bold border border-amber-200">
-                              فعلي
-                            </span>
+                        <div className="flex items-center gap-2 text-xs text-slate-600 mt-1 flex-wrap">
+                          <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black shadow-2xs ${item.unitType === 'PACK' ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-blue-100 text-blue-900 border border-blue-300'}`}>
+                            {item.unitType === 'PACK' ? 'علبة' : 'شريط'}
+                          </span>
+                          {item.breakdown && item.breakdown.length > 1 && !item.isCustomPrice ? (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {item.breakdown.map((b, bi) => (
+                                <span key={bi} className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded-lg border border-slate-300 text-xs font-mono font-bold">
+                                  {b.qty} × {roundTo250(Number(b.unitPrice)).toLocaleString()} د.ع
+                                </span>
+                              ))}
+                            </div>
                           ) : (
-                            <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded font-bold border border-slate-200">
-                              رسمي
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`font-mono font-bold ${item.isCustomPrice ? 'text-amber-800 font-black' : 'text-slate-700'}`}>
+                                {roundTo250(item.unitPrice).toLocaleString()} د.ع
+                              </span>
+
+                              {item.isCustomPrice ? (
+                                <span className="text-[10px] text-amber-900 bg-amber-100 px-1.5 py-0.5 rounded-md font-black border border-amber-300 flex items-center gap-1">
+                                  <span>⚡ مخصص</span>
+                                </span>
+                              ) : showActualPrices ? (
+                                <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded font-bold border border-amber-200">
+                                  فعلي
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded font-bold border border-slate-200">
+                                  رسمي
+                                </span>
+                              )}
+
+                              {/* Price Edit Trigger Button */}
+                              {!isEditingThisPrice && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingPriceIndex(idx);
+                                    setEditingPriceValue(item.unitPrice);
+                                    setEditingPriceError('');
+                                  }}
+                                  className="text-slate-400 hover:text-indigo-600 p-1 rounded-md hover:bg-slate-100 cursor-pointer transition-colors"
+                                  title="تغيير سعر المادة (رفع أو تقليل السعر للزبون)"
+                                >
+                                  <span className="text-xs">✏️</span>
+                                </button>
+                              )}
+
+                              {/* Reset Price Button (if custom) */}
+                              {item.isCustomPrice && !isEditingThisPrice && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCart((prev) => {
+                                      const updated = [...prev];
+                                      const cur = updated[idx];
+                                      const orig = cur.originalUnitPrice || cur.defaultSellingPricePack;
+                                      updated[idx] = {
+                                        ...cur,
+                                        unitPrice: orig,
+                                        totalPrice: roundTo250(orig * cur.quantity),
+                                        isCustomPrice: false,
+                                      };
+                                      return updated;
+                                    });
+                                  }}
+                                  className="text-[10px] text-slate-500 hover:text-rose-600 underline cursor-pointer"
+                                  title="استعادة السعر القياسي الأصلي"
+                                >
+                                  استعادة ({roundTo250(item.originalUnitPrice || item.unitPrice).toLocaleString()} د.ع)
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Quantity Controls */}
+                      <div className="flex items-center gap-1.5 bg-slate-100 rounded-2xl p-1 border border-slate-200 shadow-2xs shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(idx, -1)}
+                          className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white hover:bg-rose-50 hover:text-rose-700 text-slate-800 flex items-center justify-center shadow-xs cursor-pointer active:scale-90 transition-all font-black"
+                        >
+                          <Minus className="w-4 h-4 stroke-[3]" />
+                        </button>
+                        <span className="w-7 sm:w-8 text-center font-black text-base sm:text-lg text-slate-900 font-mono">{item.quantity}</span>
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(idx, 1)}
+                          className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white hover:bg-emerald-50 hover:text-emerald-700 text-slate-800 flex items-center justify-center shadow-xs cursor-pointer active:scale-90 transition-all font-black"
+                        >
+                          <Plus className="w-4 h-4 stroke-[3]" />
+                        </button>
+                      </div>
+
+                      {/* Line Total */}
+                      <div className="w-20 sm:w-24 text-left font-black text-sm sm:text-base text-slate-900 font-mono shrink-0">
+                        {roundTo250(item.totalPrice).toLocaleString()} د.ع
+                      </div>
+
+                      {/* Remove Button */}
+                      <button
+                        type="button"
+                        onClick={() => removeItem(idx)}
+                        className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer shrink-0"
+                        title="حذف من السلة"
+                      >
+                        <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                      </button>
+                    </div>
+
+                    {/* Inline Custom Price Editor */}
+                    {isEditingThisPrice && (
+                      <div className="p-2.5 bg-amber-50/90 rounded-xl border border-amber-300 space-y-2 animate-in fade-in duration-150">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-black text-amber-950">تغيير سعر بيع المادة للزبون:</span>
+                          {costPrice > 0 && (
+                            <span className="font-mono text-[11px] text-slate-600">
+                              سعر الشراء: <strong className="text-slate-800">{costPrice.toLocaleString()}</strong> د.ع
                             </span>
                           )}
                         </div>
-                      )}
-                    </div>
-                  </div>
 
-                  {/* Quantity Controls */}
-                  <div className="flex items-center gap-1.5 bg-slate-100 rounded-2xl p-1 border border-slate-200 shadow-2xs shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => updateQuantity(idx, -1)}
-                      className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white hover:bg-rose-50 hover:text-rose-700 text-slate-800 flex items-center justify-center shadow-xs cursor-pointer active:scale-90 transition-all font-black"
-                    >
-                      <Minus className="w-4 h-4 stroke-[3]" />
-                    </button>
-                    <span className="w-7 sm:w-8 text-center font-black text-base sm:text-lg text-slate-900 font-mono">{item.quantity}</span>
-                    <button
-                      type="button"
-                      onClick={() => updateQuantity(idx, 1)}
-                      className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white hover:bg-emerald-50 hover:text-emerald-700 text-slate-800 flex items-center justify-center shadow-xs cursor-pointer active:scale-90 transition-all font-black"
-                    >
-                      <Plus className="w-4 h-4 stroke-[3]" />
-                    </button>
-                  </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              min={minPrice}
+                              step="250"
+                              value={editingPriceValue}
+                              onChange={(e) => {
+                                setEditingPriceValue(e.target.value === '' ? '' : Number(e.target.value));
+                                setEditingPriceError('');
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  const val = Number(editingPriceValue);
+                                  if (minPrice > 0 && val < minPrice) {
+                                    setEditingPriceError(`الحد الأدنى هو ${minPrice.toLocaleString()} د.ع (سعر الشراء × 1.2)`);
+                                    return;
+                                  }
+                                  if (val <= 0) {
+                                    setEditingPriceError('يرجى إدخال سعر صحيح');
+                                    return;
+                                  }
+                                  setCart((prev) => {
+                                    const updated = [...prev];
+                                    const cur = updated[idx];
+                                    updated[idx] = {
+                                      ...cur,
+                                      unitPrice: val,
+                                      totalPrice: roundTo250(val * cur.quantity),
+                                      isCustomPrice: true,
+                                      originalUnitPrice: cur.originalUnitPrice || cur.unitPrice,
+                                    };
+                                    return updated;
+                                  });
+                                  setEditingPriceIndex(null);
+                                }
+                              }}
+                              className="w-32 p-1.5 bg-white border border-amber-400 rounded-lg font-mono font-black text-slate-900 text-sm focus:outline-hidden focus:border-amber-600 focus:ring-1 focus:ring-amber-500"
+                              autoFocus
+                            />
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">د.ع</span>
+                          </div>
 
-                  {/* Line Total */}
-                  <div className="w-20 sm:w-24 text-left font-black text-sm sm:text-base text-slate-900 font-mono shrink-0">
-                    {roundTo250(item.totalPrice).toLocaleString()} د.ع
-                  </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const val = Number(editingPriceValue);
+                              if (minPrice > 0 && val < minPrice) {
+                                setEditingPriceError(`الحد الأدنى هو ${minPrice.toLocaleString()} د.ع (سعر الشراء × 1.2)`);
+                                return;
+                              }
+                              if (val <= 0) {
+                                setEditingPriceError('يرجى إدخال سعر صحيح');
+                                return;
+                              }
+                              setCart((prev) => {
+                                const updated = [...prev];
+                                const cur = updated[idx];
+                                updated[idx] = {
+                                  ...cur,
+                                  unitPrice: val,
+                                  totalPrice: roundTo250(val * cur.quantity),
+                                  isCustomPrice: true,
+                                  originalUnitPrice: cur.originalUnitPrice || cur.unitPrice,
+                                };
+                                return updated;
+                              });
+                              setEditingPriceIndex(null);
+                            }}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-black text-xs cursor-pointer shadow-xs active:scale-95 transition-all"
+                          >
+                            تطبيق السعر
+                          </button>
 
-                  {/* Remove Button */}
-                  <button
-                    type="button"
-                    onClick={() => removeItem(idx)}
-                    className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer shrink-0"
-                    title="حذف من السلة"
-                  >
-                    <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                  </button>
-                </div>
-              ))
+                          <button
+                            type="button"
+                            onClick={() => setEditingPriceIndex(null)}
+                            className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-bold text-xs cursor-pointer transition-all"
+                          >
+                            إلغاء
+                          </button>
+                        </div>
+
+                        {minPrice > 0 ? (
+                          <div className="text-[10px] text-amber-900 font-bold flex items-center gap-1">
+                            <span>🛡️ الحد الأدنى المسموح به:</span>
+                            <span className="font-mono font-black">{minPrice.toLocaleString()} د.ع</span>
+                            <span>(سعر الشراء {costPrice.toLocaleString()} + هامش ربح إلزامي 20%)</span>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-slate-500">
+                            يمكنك تعديل السعر بحرية لهذا الدواء.
+                          </div>
+                        )}
+
+                        {editingPriceError && (
+                          <div className="text-[11px] text-rose-700 font-black flex items-center gap-1 bg-rose-50 p-1.5 rounded-lg border border-rose-200">
+                            <span>⚠️</span>
+                            <span>{editingPriceError}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
 
@@ -1763,6 +2040,14 @@ export const PosView: React.FC = () => {
                 <span className="text-slate-500">إجمالي المرتجعات:</span>
                 <span className="font-bold text-amber-600">{shiftSummary.totalRefunds.toLocaleString()} د.ع</span>
               </div>
+              {shiftSummary.customPriceItemsCount !== undefined && shiftSummary.customPriceItemsCount > 0 && (
+                <div className="flex justify-between py-1.5 border-b border-slate-100">
+                  <span className="text-slate-500">مواد بأسعار مخصصة:</span>
+                  <span className="font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
+                    ⚡ {shiftSummary.customPriceItemsCount} مواد
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between py-2 bg-emerald-50 px-3 rounded-lg text-emerald-900 font-extrabold text-base">
                 <span>صافي الكاش في الدرج:</span>
                 <span>{shiftSummary.netCashInDrawer.toLocaleString()} د.ع</span>
@@ -2750,6 +3035,20 @@ export const PosView: React.FC = () => {
                 )}
 
                 <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    كلمة مرور حساب الكاشير الحالي (تأكيد الأمان والإغلاق) *
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    value={shiftClosePassword}
+                    onChange={(e) => setShiftClosePassword(e.target.value)}
+                    placeholder="أدخل كلمة مرور حسابك لتأكيد إغلاق الوردية"
+                    className="w-full p-2.5 bg-rose-50/50 border border-rose-300 rounded-xl font-mono text-slate-900 focus:outline-hidden focus:border-rose-600"
+                  />
+                </div>
+
+                <div>
                   <label className="block font-bold text-slate-700 mb-1">ملاحظات تسليم الوردية</label>
                   <textarea
                     rows={2}
@@ -2772,7 +3071,7 @@ export const PosView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={closingShift || actualCashInput === ''}
+                  disabled={closingShift || actualCashInput === '' || !shiftClosePassword}
                   className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 text-white rounded-xl font-black shadow-xs active:scale-95 transition-all cursor-pointer flex items-center gap-1.5"
                 >
                   {closingShift ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
@@ -3027,7 +3326,17 @@ export const PosView: React.FC = () => {
                                             </span>
                                           </td>
                                           <td className="py-2 px-3 text-left font-mono text-slate-600">
-                                            {Number(item.unitPrice || 0).toLocaleString()} د.ع
+                                            <div className="flex items-center gap-1.5 justify-end">
+                                              <span>{Number(item.unitPrice || 0).toLocaleString()} د.ع</span>
+                                              {item.isCustomPrice && (
+                                                <span
+                                                  className="text-[10px] bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded font-black border border-amber-300"
+                                                  title={`السعر الأصلي: ${Number(item.originalUnitPrice || 0).toLocaleString()} د.ع`}
+                                                >
+                                                  ⚡ مخصص
+                                                </span>
+                                              )}
+                                            </div>
                                           </td>
                                           <td className="py-2 px-3 text-left font-mono font-black text-emerald-800">
                                             {lineTotal.toLocaleString()} د.ع
@@ -3073,6 +3382,97 @@ export const PosView: React.FC = () => {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cashier Password Prompt Modal (Security Lock for Sales History & Daily Summary) */}
+      {showPasswordPromptModal && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center font-black">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-slate-900">قفل الأمان للكاشير</h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    {passwordPromptAction === 'SALES_HISTORY'
+                      ? 'سجل الفواتير وأرشيف المبيعات'
+                      : 'ملخص الوردية واليومية'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPasswordPromptModal(false);
+                  setPasswordPromptAction(null);
+                  setCashierPasswordInput('');
+                  setPasswordPromptError('');
+                }}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleVerifyPasswordSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1.5">
+                  يرجى إدخال كلمة سر حساب الكاشير الحالي:
+                </label>
+                <div className="relative">
+                  <input
+                    type="password"
+                    autoFocus
+                    required
+                    value={cashierPasswordInput}
+                    onChange={(e) => {
+                      setCashierPasswordInput(e.target.value);
+                      setPasswordPromptError('');
+                    }}
+                    placeholder="كلمة المرور..."
+                    className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl font-mono text-slate-900 text-sm focus:outline-hidden focus:border-indigo-600 focus:bg-white focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+                {passwordPromptError && (
+                  <p className="text-rose-600 font-bold mt-1.5 flex items-center gap-1">
+                    <span>⚠️</span>
+                    <span>{passwordPromptError}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPasswordPromptModal(false);
+                    setPasswordPromptAction(null);
+                    setCashierPasswordInput('');
+                    setPasswordPromptError('');
+                  }}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer transition-all"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={verifyingCashierPassword || !cashierPasswordInput}
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl font-black shadow-xs active:scale-95 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  {verifyingCashierPassword ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="w-4 h-4" />
+                  )}
+                  <span>تأكيد المتابعة</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
