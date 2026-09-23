@@ -745,6 +745,22 @@ export class TenantMigrationService {
           ADD COLUMN IF NOT EXISTS official_price_unit DECIMAL(12, 2)`,
       ],
     },
+
+    // ----------------------------------------------------------------
+    // 008: Synchronize Inventory Batch Prices with Item Prices
+    // ----------------------------------------------------------------
+    {
+      name: '008_sync_inventory_batch_prices',
+      description: 'Synchronize inventory batch selling prices with inventory item master prices',
+      sql: (schema: string) => [
+        `UPDATE "${schema}".inventory_batches b
+         SET selling_price_pack = ii.selling_price_pack,
+             selling_price_unit = ii.selling_price_unit
+         FROM "${schema}".inventory_items ii
+         WHERE b.inventory_item_id = ii.id
+           AND ii.selling_price_pack > 0;`,
+      ],
+    },
   ];
 
   /**

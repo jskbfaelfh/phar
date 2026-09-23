@@ -167,7 +167,7 @@ export class InventoryController {
   }
 
   @Patch(':id/price')
-  @Roles('OWNER')
+  @Roles('OWNER', 'CASHIER')
   async updateItemPrice(
     @Param('id') id: string,
     @Body() dto: UpdateItemPriceDto,

@@ -64,6 +64,10 @@ export class UpdatePharmacyProfileDto {
   is24Hours?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  allowCashierInventoryAccess?: boolean;
+
+  @IsOptional()
   @IsString()
   geminiApiKey?: string;
 }

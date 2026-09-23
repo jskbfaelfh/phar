@@ -919,6 +919,7 @@ export class InventoryService {
         i.shelf_location as "shelfLocation",
         m.barcode as "barcode",
         COALESCE(
+          NULLIF(i.selling_price_pack, 0),
           (SELECT b_sub.selling_price_pack 
            FROM "${schemaName}".inventory_batches b_sub 
            WHERE b_sub.inventory_item_id = i.id 
@@ -928,9 +929,11 @@ export class InventoryService {
              AND b_sub.selling_price_pack IS NOT NULL
            ORDER BY b_sub.expiry_date ASC, b_sub.created_at ASC 
            LIMIT 1), 
-          i.selling_price_pack
+          i.selling_price_pack,
+          0
         ) as "sellingPricePack",
         COALESCE(
+          NULLIF(i.selling_price_unit, 0),
           (SELECT b_sub.selling_price_unit 
            FROM "${schemaName}".inventory_batches b_sub 
            WHERE b_sub.inventory_item_id = i.id 
@@ -940,7 +943,8 @@ export class InventoryService {
              AND b_sub.selling_price_unit IS NOT NULL
            ORDER BY b_sub.expiry_date ASC, b_sub.created_at ASC 
            LIMIT 1), 
-          i.selling_price_unit
+          i.selling_price_unit,
+          0
         ) as "sellingPriceUnit",
         COALESCE(
           (SELECT b_sub.purchase_price_pack 
@@ -1401,6 +1405,17 @@ export class InventoryService {
     const medicineId = current.medicine_id;
     const tradeName = current.custom_name || current.trade_name || 'دواء مسجل';
 
+    const resolvedCustomName = dto.customName !== undefined ? (dto.customName?.trim() || null) : current.custom_name;
+    const resolvedShelfLocation = dto.shelfLocation !== undefined ? (dto.shelfLocation?.trim() || null) : current.shelf_location;
+    const resolvedSellingPricePack = Number(dto.sellingPricePack) || 0;
+    const resolvedSellingPriceUnit = Number(dto.sellingPriceUnit) || 0;
+    const resolvedOfficialPricePack = dto.officialPricePack !== undefined && dto.officialPricePack !== null
+      ? Number(dto.officialPricePack)
+      : (current.official_price_pack ?? resolvedSellingPricePack);
+    const resolvedOfficialPriceUnit = dto.officialPriceUnit !== undefined && dto.officialPriceUnit !== null
+      ? Number(dto.officialPriceUnit)
+      : (current.official_price_unit ?? resolvedSellingPriceUnit);
+
     await this.prisma.$executeRawUnsafe(
       `UPDATE "${schemaName}".inventory_items
        SET custom_name = $1,
@@ -1412,13 +1427,24 @@ export class InventoryService {
            shelf_location = $7,
            updated_at = NOW()
        WHERE id = $8::uuid`,
-      dto.customName !== undefined ? dto.customName : null,
-      dto.sellingPricePack,
-      dto.sellingPriceUnit,
-      dto.officialPricePack !== undefined ? dto.officialPricePack : (current.official_price_pack ?? dto.sellingPricePack ?? null),
-      dto.officialPriceUnit !== undefined ? dto.officialPriceUnit : (current.official_price_unit ?? dto.sellingPriceUnit ?? null),
+      resolvedCustomName,
+      resolvedSellingPricePack,
+      resolvedSellingPriceUnit,
+      resolvedOfficialPricePack,
+      resolvedOfficialPriceUnit,
       dto.minAlertUnits || null,
-      dto.shelfLocation !== undefined ? dto.shelfLocation : null,
+      resolvedShelfLocation,
+      inventoryItemId,
+    );
+
+    // Also update all batches for this inventory item so batch-level pricing stays synchronized!
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE "${schemaName}".inventory_batches
+       SET selling_price_pack = $1,
+           selling_price_unit = $2
+       WHERE inventory_item_id = $3::uuid`,
+      resolvedSellingPricePack,
+      resolvedSellingPriceUnit,
       inventoryItemId,
     );
 

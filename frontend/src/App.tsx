@@ -24,7 +24,10 @@ import {
   Clock,
   ClipboardCheck,
   Shield,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
+import { usePharmacyLiveSync } from './hooks/usePharmacyLiveSync';
 import { PosView } from './views/PosView';
 import { BulkStockEntryView } from './views/BulkStockEntryView';
 import { InventoryView } from './views/InventoryView';
@@ -118,6 +121,94 @@ export const App: React.FC = () => {
   const [isSwitchingBranch, setIsSwitchingBranch] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
 
+  const canViewInventory =
+    currentUser?.role === 'SUPER_ADMIN' ||
+    currentUser?.role === 'OWNER' ||
+    currentPharmacy?.allowCashierInventoryAccess === true;
+
+  const [isTogglingInventoryAccess, setIsTogglingInventoryAccess] = useState<boolean>(false);
+
+  const handleToggleCashierInventoryAccess = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (currentUser?.role !== 'OWNER' || isTogglingInventoryAccess) return;
+
+    const newStatus = !currentPharmacy?.allowCashierInventoryAccess;
+    setIsTogglingInventoryAccess(true);
+
+    try {
+      const res = await apiRequest<any>('/pharmacy/profile', {
+        method: 'PATCH',
+        body: JSON.stringify({ allowCashierInventoryAccess: newStatus }),
+      });
+
+      if (res?.pharmacy) {
+        setCurrentPharmacy((prev: any) => ({ ...prev, ...res.pharmacy }));
+        const stored = getStoredPharmacy();
+        if (stored) {
+          localStorage.setItem('dawaee_pharmacy', JSON.stringify({ ...stored, ...res.pharmacy }));
+        }
+      } else {
+        setCurrentPharmacy((prev: any) => ({ ...prev, allowCashierInventoryAccess: newStatus }));
+      }
+    } catch (err: any) {
+      alert(err.message || 'فشل تحديث صلاحيات الكاشير للمخزن');
+    } finally {
+      setIsTogglingInventoryAccess(false);
+    }
+  };
+
+  // Real-time synchronization for pharmacy settings and inventory access
+  usePharmacyLiveSync((eventType, data) => {
+    if (eventType === 'PHARMACY_SETTINGS_UPDATED' && data?.pharmacy) {
+      setCurrentPharmacy((prev: any) => ({
+        ...prev,
+        ...data.pharmacy,
+      }));
+      try {
+        const stored = getStoredPharmacy();
+        if (stored) {
+          localStorage.setItem('dawaee_pharmacy', JSON.stringify({ ...stored, ...data.pharmacy }));
+        }
+      } catch (e) {}
+
+      // If current user is Cashier and inventory access was revoked while viewing an inventory page
+      if (currentUser?.role === 'CASHIER' && !data.pharmacy.allowCashierInventoryAccess) {
+        if (['INVENTORY', 'EXPIRY', 'STOCKTAKE', 'PURCHASES', 'BULK_STOCK'].includes(activeTab)) {
+          setActiveTab('POS');
+          alert('تم تحديث صلاحيات الوصول من قبل إدارة الصيدلية، تم توجيهك إلى شاشة الكاشير.');
+        }
+      }
+    }
+  });
+
+  // Sync fresh pharmacy profile on startup
+  useEffect(() => {
+    if (currentUser && currentUser.role !== 'SUPER_ADMIN') {
+      apiRequest<any>('/pharmacy/profile')
+        .then((data) => {
+          if (data?.pharmacy) {
+            setCurrentPharmacy((prev: any) => ({ ...prev, ...data.pharmacy }));
+            const stored = getStoredPharmacy();
+            if (stored) {
+              localStorage.setItem('dawaee_pharmacy', JSON.stringify({ ...stored, ...data.pharmacy }));
+            }
+          }
+        })
+        .catch(() => {});
+    }
+  }, [currentUser?.id]);
+
+  // Protect inventory tabs if cashier does not have access
+  useEffect(() => {
+    if (
+      currentUser?.role === 'CASHIER' &&
+      !canViewInventory &&
+      ['INVENTORY', 'EXPIRY', 'STOCKTAKE', 'PURCHASES', 'BULK_STOCK'].includes(activeTab)
+    ) {
+      setActiveTab('POS');
+    }
+  }, [currentUser, canViewInventory, activeTab]);
+
   // Sync browser URL & listen to Back/Forward navigation
   useEffect(() => {
     const handlePopState = () => {
@@ -133,6 +224,12 @@ export const App: React.FC = () => {
   }, []);
 
   const navigateToTab = (tab: ActiveTab) => {
+    const inventoryTabs: ActiveTab[] = ['INVENTORY', 'EXPIRY', 'STOCKTAKE', 'PURCHASES', 'BULK_STOCK'];
+    if (inventoryTabs.includes(tab) && !canViewInventory) {
+      setActiveTab('POS');
+      return;
+    }
+
     setActiveTab(tab);
     try {
       if (tab === 'LOGIN') {
@@ -381,10 +478,17 @@ export const App: React.FC = () => {
     );
   };
 
-  const SectionHeading = ({ title }: { title: string }) => {
+  const SectionHeading = ({
+    title,
+    action,
+  }: {
+    title: string;
+    action?: React.ReactNode;
+  }) => {
     return (
-      <div className="text-[10px] font-black text-slate-400 px-3 pt-3 pb-1 tracking-wider uppercase">
-        {title}
+      <div className="flex items-center justify-between text-[10px] font-black text-slate-400 px-3 pt-3 pb-1 tracking-wider uppercase">
+        <span>{title}</span>
+        {action}
       </div>
     );
   };
@@ -496,38 +600,77 @@ export const App: React.FC = () => {
               />
 
               {/* Warehouse & Inventory */}
-              <SectionHeading title="المخزن والمشتريات" />
-              <NavItem
-                tab="INVENTORY"
-                label="المخزن"
-                icon={Package}
-                activeColor="bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
-              />
-              <NavItem
-                tab="EXPIRY"
-                label="الإكسباير"
-                icon={Clock}
-                activeColor="bg-purple-600 text-white shadow-md shadow-purple-900/30"
-              />
-              <NavItem
-                tab="STOCKTAKE"
-                label="الجرد والتسوية"
-                icon={ClipboardCheck}
-                badge="جديد"
-                activeColor="bg-teal-600 text-white shadow-md shadow-teal-900/30"
-              />
-              <NavItem
-                tab="PURCHASES"
-                label="المشتريات"
-                icon={FileText}
-                activeColor="bg-blue-600 text-white shadow-md shadow-blue-900/30"
-              />
-              <NavItem
-                tab="BULK_STOCK"
-                label="إدخال وجبة"
-                icon={PackagePlus}
-                activeColor="bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
-              />
+              {canViewInventory && (
+                <>
+                  <SectionHeading
+                    title="المخزن والمشتريات"
+                    action={
+                      currentUser?.role === 'OWNER' ? (
+                        <button
+                          type="button"
+                          onClick={handleToggleCashierInventoryAccess}
+                          disabled={isTogglingInventoryAccess}
+                          title={
+                            currentPharmacy?.allowCashierInventoryAccess
+                              ? 'القسم متاح للكاشير حالياً - انقر للإخفاء والقفل عن الكاشير'
+                              : 'القسم مخفي عن الكاشير حالياً - انقر للإظهار والسماح للكاشير'
+                          }
+                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-black cursor-pointer transition-all border ${
+                            currentPharmacy?.allowCashierInventoryAccess
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
+                              : 'bg-rose-500/20 text-rose-300 border-rose-500/40 hover:bg-rose-500/30'
+                          }`}
+                        >
+                          {isTogglingInventoryAccess ? (
+                            <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                          ) : currentPharmacy?.allowCashierInventoryAccess ? (
+                            <>
+                              <Eye className="w-2.5 h-2.5" />
+                              <span>متاح للكاشير</span>
+                            </>
+                          ) : (
+                            <>
+                              <EyeOff className="w-2.5 h-2.5" />
+                              <span>مخفي عن الكاشير</span>
+                            </>
+                          )}
+                        </button>
+                      ) : undefined
+                    }
+                  />
+                  <NavItem
+                    tab="INVENTORY"
+                    label="المخزن"
+                    icon={Package}
+                    activeColor="bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                  />
+                  <NavItem
+                    tab="EXPIRY"
+                    label="الإكسباير"
+                    icon={Clock}
+                    activeColor="bg-purple-600 text-white shadow-md shadow-purple-900/30"
+                  />
+                  <NavItem
+                    tab="STOCKTAKE"
+                    label="الجرد والتسوية"
+                    icon={ClipboardCheck}
+                    badge="جديد"
+                    activeColor="bg-teal-600 text-white shadow-md shadow-teal-900/30"
+                  />
+                  <NavItem
+                    tab="PURCHASES"
+                    label="المشتريات"
+                    icon={FileText}
+                    activeColor="bg-blue-600 text-white shadow-md shadow-blue-900/30"
+                  />
+                  <NavItem
+                    tab="BULK_STOCK"
+                    label="إدخال وجبة"
+                    icon={PackagePlus}
+                    activeColor="bg-indigo-600 text-white shadow-md shadow-indigo-900/30"
+                  />
+                </>
+              )}
 
               {/* Financial & Accounts */}
               {currentUser?.role === 'OWNER' && (
@@ -811,11 +954,11 @@ export const App: React.FC = () => {
         {/* Dynamic View Component with Independent Smooth Scroll */}
         <main className="flex-1 overflow-y-auto p-2 sm:p-5 w-full max-w-full overflow-x-hidden">
           {activeTab === 'POS' && <PosView />}
-          {activeTab === 'BULK_STOCK' && <BulkStockEntryView />}
-          {activeTab === 'INVENTORY' && <InventoryView onNavigateToExpiry={() => navigateToTab('EXPIRY')} />}
-          {activeTab === 'EXPIRY' && <ExpiryView onNavigateToInventory={() => navigateToTab('INVENTORY')} />}
-          {activeTab === 'STOCKTAKE' && <StocktakeView onNavigateToInventory={() => navigateToTab('INVENTORY')} />}
-          {activeTab === 'PURCHASES' && <PurchasesView />}
+          {activeTab === 'BULK_STOCK' && (canViewInventory ? <BulkStockEntryView /> : <PosView />)}
+          {activeTab === 'INVENTORY' && (canViewInventory ? <InventoryView onNavigateToExpiry={() => navigateToTab('EXPIRY')} /> : <PosView />)}
+          {activeTab === 'EXPIRY' && (canViewInventory ? <ExpiryView onNavigateToInventory={() => navigateToTab('INVENTORY')} /> : <PosView />)}
+          {activeTab === 'STOCKTAKE' && (canViewInventory ? <StocktakeView onNavigateToInventory={() => navigateToTab('INVENTORY')} /> : <PosView />)}
+          {activeTab === 'PURCHASES' && (canViewInventory ? <PurchasesView /> : <PosView />)}
           {activeTab === 'EXPENSES' && <ExpensesView />}
           {activeTab === 'CHAIN' && (
             <ChainManagementView

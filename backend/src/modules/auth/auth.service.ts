@@ -118,6 +118,7 @@ export class AuthService {
         phone: tenant.phone,
         subscriptionStatus: currentStatus,
         subscriptionEndsAt: tenant.subscriptionEndsAt,
+        allowCashierInventoryAccess: Boolean((tenant as any).allowCashierInventoryAccess),
       },
       branches,
     };
@@ -491,6 +492,7 @@ export class AuthService {
         phone: targetTenant.phone,
         subscriptionStatus: currentStatus,
         subscriptionEndsAt: targetTenant.subscriptionEndsAt,
+        allowCashierInventoryAccess: Boolean((targetTenant as any).allowCashierInventoryAccess),
       },
       branches,
     };

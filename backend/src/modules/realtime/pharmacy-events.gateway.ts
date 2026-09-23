@@ -161,4 +161,17 @@ export class PharmacyEventsGateway
       count: payload.count,
     });
   }
+
+  /**
+   * Broadcast pharmacy settings/permissions updated event
+   */
+  @OnEvent('pharmacy.settings_updated')
+  handleSettingsUpdated(payload: { tenantId: string; pharmacy: any }) {
+    if (!payload.tenantId || !this.server) return;
+    const roomName = `tenant_${payload.tenantId}`;
+    this.server.to(roomName).emit('PHARMACY_SETTINGS_UPDATED', {
+      timestamp: new Date().toISOString(),
+      pharmacy: payload.pharmacy,
+    });
+  }
 }

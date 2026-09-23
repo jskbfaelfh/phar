@@ -26,6 +26,7 @@ import {
   Sparkles,
   ExternalLink,
   EyeOff,
+  ShieldCheck,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { IRAQ_LOCATIONS, type GovernorateData } from '../data/iraq-locations';
@@ -63,6 +64,7 @@ export const PharmacyProfileView: React.FC = () => {
     showWhatsapp: true,
     is24Hours: false,
     geminiApiKey: '',
+    allowCashierInventoryAccess: false,
   });
 
   // Owner password form
@@ -103,6 +105,7 @@ export const PharmacyProfileView: React.FC = () => {
           showWhatsapp: data.pharmacy.showWhatsapp ?? true,
           is24Hours: data.pharmacy.is24Hours ?? false,
           geminiApiKey: '',
+          allowCashierInventoryAccess: Boolean(data.pharmacy.allowCashierInventoryAccess),
         });
       }
     } catch (err: any) {
@@ -245,11 +248,57 @@ export const PharmacyProfileView: React.FC = () => {
 
       setMessage({ type: 'success', text: res.message || 'تم حفظ بيانات وشعار الصيدلية بنجاح' });
       setPharmacyForm((prev) => ({ ...prev, geminiApiKey: '' }));
+      if (res?.pharmacy) {
+        const stored = localStorage.getItem('dawaee_pharmacy');
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            localStorage.setItem('dawaee_pharmacy', JSON.stringify({ ...parsed, ...res.pharmacy }));
+          } catch (e) {}
+        }
+      }
       fetchProfile();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'فشل حفظ بيانات الصيدلية' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Instant toggle for cashier inventory access
+  const [togglingInventoryAccess, setTogglingInventoryAccess] = useState(false);
+  const handleToggleInventoryAccess = async () => {
+    if (togglingInventoryAccess) return;
+    const newStatus = !pharmacyForm.allowCashierInventoryAccess;
+    setTogglingInventoryAccess(true);
+    setPharmacyForm((prev) => ({ ...prev, allowCashierInventoryAccess: newStatus }));
+
+    try {
+      const res = await apiRequest<any>('/pharmacy/profile', {
+        method: 'PATCH',
+        body: JSON.stringify({ allowCashierInventoryAccess: newStatus }),
+      });
+      if (res?.pharmacy) {
+        const stored = localStorage.getItem('dawaee_pharmacy');
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            localStorage.setItem('dawaee_pharmacy', JSON.stringify({ ...parsed, ...res.pharmacy }));
+          } catch (e) {}
+        }
+      }
+      setMessage({
+        type: 'success',
+        text: newStatus
+          ? 'تم تفعيل ظهور قسم المخزن والمشتريات لحسابات الكاشير بنجاح'
+          : 'تم إخفاء قسم المخزن والمشتريات عن حسابات الكاشير بنجاح',
+      });
+      fetchProfile();
+    } catch (err: any) {
+      setPharmacyForm((prev) => ({ ...prev, allowCashierInventoryAccess: !newStatus }));
+      setMessage({ type: 'error', text: err.message || 'فشل تعديل صلاحية وصول الكاشير' });
+    } finally {
+      setTogglingInventoryAccess(false);
     }
   };
 
@@ -917,7 +966,91 @@ export const PharmacyProfileView: React.FC = () => {
             </button>
           </form>
 
-          {/* 4. Cashiers & Staff Management */}
+          {/* 4. Cashier Permissions Control (Warehouse & Purchases Section Visibility) */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-base">
+                    صلاحيات الكاشير: إظهار أو إخفاء (المخزن والمشتريات)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    التحكم في ظهور قسم المخزن والمشتريات بجميع صفحاته الـ 5 لحسابات الكاشير
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Badge */}
+              <span
+                className={`px-3 py-1.5 rounded-full text-xs font-black flex items-center gap-1.5 self-start sm:self-auto border ${
+                  pharmacyForm.allowCashierInventoryAccess
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-rose-50 text-rose-700 border-rose-200'
+                }`}
+              >
+                {pharmacyForm.allowCashierInventoryAccess ? (
+                  <>
+                    <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>متاح للكاشير (ظاهر)</span>
+                  </>
+                ) : (
+                  <>
+                    <EyeOff className="w-3.5 h-3.5 text-rose-600" />
+                    <span>مقفل ومخفي عن الكاشير (خاص بالمدير فقط)</span>
+                  </>
+                )}
+              </span>
+            </div>
+
+            <div className="p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-1.5 max-w-xl text-right">
+                <div className="text-xs font-black text-slate-900 flex items-center gap-2">
+                  <span>الصفحات المشمولة بالتحكم الموحد:</span>
+                  <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
+                    المخزن • الإكسباير • الجرد والتسوية • المشتريات • إدخال وجبة
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed font-medium">
+                  {pharmacyForm.allowCashierInventoryAccess
+                    ? 'القسم ظاهر حالياً لموظفي الكاشير في شريط القائمة الجانبية ويمكنهم الدخول إليه. يمكنك إخفاؤه في أي وقت بالضغط على الزر المقابل.'
+                    : 'القسم مخفي بالكامل حالياً عن جميع حسابات الكاشير ويظهر لحساب المدير فقط. عند تفعيله، سيظهر القسم فورياً للكاشير دون الحاجة لإعادة تسجيل الدخول.'}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleToggleInventoryAccess}
+                disabled={togglingInventoryAccess}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black shadow-xs cursor-pointer transition-all active:scale-95 shrink-0 ${
+                  pharmacyForm.allowCashierInventoryAccess
+                    ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-900/10'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/10'
+                }`}
+              >
+                {togglingInventoryAccess ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>جاري التحديث...</span>
+                  </>
+                ) : pharmacyForm.allowCashierInventoryAccess ? (
+                  <>
+                    <EyeOff className="w-4 h-4" />
+                    <span>قفل وإخفاء القسم عن الكاشير</span>
+                  </>
+                ) : (
+                  <>
+                    <Eye className="w-4 h-4" />
+                    <span>السماح للكاشير وإظهار القسم</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* 5. Cashiers & Staff Management */}
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="font-black text-slate-900 text-base flex items-center gap-2">

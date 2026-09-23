@@ -20,6 +20,9 @@ import {
   ChevronDown,
   ChevronUp,
   SlidersHorizontal,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { roundTo250, calculateStripPrice } from '../utils/currency';
@@ -51,7 +54,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'ALL' | 'LOW_STOCK' | 'EXPIRING_SOON' | 'NO_BARCODE'>('ALL');
+  const [activeFilter, setActiveFilter] = useState<'ALL' | 'LOW_STOCK' | 'EXPIRING_SOON' | 'NO_BARCODE' | 'BARCODE_1_1000'>('ALL');
 
   // Exact real-time counts from local DB / backend summary
   const [totalCount, setTotalCount] = useState<number>(0);
@@ -63,8 +66,21 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
     return items.filter((it) => !it.barcode || String(it.barcode).trim() === '').length;
   }, [items]);
 
-  const filteredItems = React.useMemo(() => {
+  // Barcode 1 to 1000 items count calculation
+  const barcode1to1000Count = React.useMemo(() => {
     return items.filter((it) => {
+      if (!it.barcode) return false;
+      const bStr = String(it.barcode).trim();
+      if (!/^\d+$/.test(bStr)) return false;
+      const num = parseInt(bStr, 10);
+      return num >= 1 && num <= 1000;
+    }).length;
+  }, [items]);
+
+  const [barcodeSortOrder, setBarcodeSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  const filteredItems = React.useMemo(() => {
+    let result = items.filter((it) => {
       if (activeFilter === 'LOW_STOCK') {
         const units = Number(it.validUnitsRemaining ?? it.totalUnitsRemaining ?? 0);
         const minAlert = Number(it.minAlertUnits || 5);
@@ -73,9 +89,27 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
       if (activeFilter === 'NO_BARCODE') {
         return !it.barcode || String(it.barcode).trim() === '';
       }
+      if (activeFilter === 'BARCODE_1_1000') {
+        if (!it.barcode) return false;
+        const bStr = String(it.barcode).trim();
+        if (!/^\d+$/.test(bStr)) return false;
+        const num = parseInt(bStr, 10);
+        return num >= 1 && num <= 1000;
+      }
       return true;
     });
-  }, [items, activeFilter]);
+
+    // When filtering by BARCODE_1_1000, sort items numerically (e.g. 1, 2, 3... 1000)
+    if (activeFilter === 'BARCODE_1_1000') {
+      result = [...result].sort((a, b) => {
+        const numA = parseInt(String(a.barcode).trim(), 10) || 0;
+        const numB = parseInt(String(b.barcode).trim(), 10) || 0;
+        return barcodeSortOrder === 'desc' ? numB - numA : numA - numB;
+      });
+    }
+
+    return result;
+  }, [items, activeFilter, barcodeSortOrder]);
 
   // Suppliers filter
   const [suppliers, setSuppliers] = useState<any[]>([]);
@@ -396,23 +430,55 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
     if (!editingItem) return;
 
     try {
+      const spPack = Number(editForm.sellingPricePack) || 0;
+      const spUnit = Number(editForm.sellingPriceUnit) || 0;
+      const offPack = Number(editForm.officialPricePack) || spPack;
+      const offUnit = Number(editForm.officialPriceUnit) || spUnit;
+      const minAlert = Number(editForm.minAlertUnits) || 5;
+      const shelf = editForm.shelfLocation ? editForm.shelfLocation.trim() : null;
+      const bcode = editForm.barcode?.trim() || undefined;
+      const cName = editForm.customName?.trim() || undefined;
+
       await apiRequest(`/inventory/${editingItem.id}/price`, {
         method: 'PATCH',
         body: JSON.stringify({
-          customName: editForm.customName || undefined,
-          barcode: editForm.barcode?.trim() || undefined,
-          sellingPricePack: Number(editForm.sellingPricePack),
-          sellingPriceUnit: Number(editForm.sellingPriceUnit),
-          officialPricePack: Number(editForm.officialPricePack),
-          officialPriceUnit: Number(editForm.officialPriceUnit),
-          minAlertUnits: Number(editForm.minAlertUnits),
-          shelfLocation: editForm.shelfLocation ? editForm.shelfLocation.trim() : null,
+          customName: cName,
+          barcode: bcode,
+          sellingPricePack: spPack,
+          sellingPriceUnit: spUnit,
+          officialPricePack: offPack,
+          officialPriceUnit: offUnit,
+          minAlertUnits: minAlert,
+          shelfLocation: shelf,
         }),
       });
 
-      setMessage({ type: 'success', text: `تم تحديث سعر وموقع رف (${editingItem.tradeName}) بنجاح` });
+      // Immediate optimistic update of inventory table state
+      setItems((prevItems) => {
+        const updated = prevItems.map((item) =>
+          item.id === editingItem.id
+            ? {
+                ...item,
+                sellingPricePack: spPack,
+                sellingPriceUnit: spUnit,
+                officialPricePack: offPack,
+                officialPriceUnit: offUnit,
+                minAlertUnits: minAlert,
+                shelfLocation: shelf,
+                barcode: bcode || item.barcode,
+                customName: cName || item.customName,
+                tradeName: cName || item.tradeName,
+              }
+            : item,
+        );
+        saveLocalInventoryBulk(updated).catch(console.error);
+        return updated;
+      });
+
+      setMessage({ type: 'success', text: `تم تحديث سعر وموقع رف (${cName || editingItem.tradeName}) بنجاح` });
       setEditingItem(null);
       fetchInventory();
+      fetchSummaryCounts();
       setTimeout(() => setMessage(null), 3000);
     } catch (err: any) {
       alert(err.message || 'فشل تحديث السعر');
@@ -505,11 +571,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
       {currentTab === 'INVENTORY' && (
         <div className="space-y-5">
           {/* Fast Overview Stat Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5">
+          {/* Fast Overview Stat Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             {/* Card 1: Total Medicines */}
             <button
               onClick={() => setActiveFilter('ALL')}
-              className={`p-4 rounded-2xl border text-right transition-all cursor-pointer ${
+              className={`p-3.5 rounded-2xl border text-right transition-all cursor-pointer ${
                 activeFilter === 'ALL'
                   ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-400 ring-offset-2'
                   : 'bg-white text-slate-800 border-slate-200 hover:border-slate-300'
@@ -530,7 +597,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
             {/* Card 2: Low Stock Alerts */}
             <button
               onClick={() => setActiveFilter('LOW_STOCK')}
-              className={`p-4 rounded-2xl border text-right transition-all cursor-pointer ${
+              className={`p-3.5 rounded-2xl border text-right transition-all cursor-pointer ${
                 activeFilter === 'LOW_STOCK'
                   ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-amber-400 ring-offset-2'
                   : 'bg-amber-50 text-amber-950 border-amber-200 hover:border-amber-300'
@@ -564,7 +631,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                   setActiveFilter('EXPIRING_SOON');
                 }
               }}
-              className={`p-4 rounded-2xl border text-right transition-all cursor-pointer ${
+              className={`p-3.5 rounded-2xl border text-right transition-all cursor-pointer ${
                 activeFilter === 'EXPIRING_SOON'
                   ? 'bg-rose-600 text-white border-rose-600 shadow-md ring-2 ring-rose-400 ring-offset-2'
                   : 'bg-rose-50 text-rose-950 border-rose-200 hover:border-rose-300'
@@ -588,7 +655,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
             {/* Card 4: No Barcode Items */}
             <button
               onClick={() => setActiveFilter('NO_BARCODE')}
-              className={`p-4 rounded-2xl border text-right transition-all cursor-pointer ${
+              className={`p-3.5 rounded-2xl border text-right transition-all cursor-pointer ${
                 activeFilter === 'NO_BARCODE'
                   ? 'bg-purple-600 text-white border-purple-600 shadow-md ring-2 ring-purple-400 ring-offset-2'
                   : 'bg-purple-50 text-purple-950 border-purple-200 hover:border-purple-300'
@@ -605,38 +672,85 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                 {activeFilter === 'NO_BARCODE' ? (
                   <span className="text-purple-950 font-bold bg-purple-200/70 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
                     <Filter className="w-3 h-3" />
-                    تصفية بدون باركود
+                    تصفية مفعلة
                   </span>
                 ) : (
                   'تخصيص باركود 1-1000'
                 )}
               </div>
             </button>
+
+            {/* Card 5: Short Barcode 1-1000 Items */}
+            <button
+              onClick={() => {
+                if (activeFilter === 'BARCODE_1_1000') {
+                  setActiveFilter('ALL');
+                } else {
+                  setActiveFilter('BARCODE_1_1000');
+                  setBarcodeSortOrder('asc');
+                }
+              }}
+              className={`p-3.5 rounded-2xl border text-right transition-all cursor-pointer ${
+                activeFilter === 'BARCODE_1_1000'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-md ring-2 ring-blue-400 ring-offset-2'
+                  : 'bg-blue-50 text-blue-950 border-blue-200 hover:border-blue-300'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="font-bold text-xs">باركود 1-1000</div>
+                <Barcode className="w-5 h-5 text-blue-700" />
+              </div>
+              <div className="text-xl font-black mt-1.5 text-blue-950 font-mono">
+                {barcode1to1000Count} <span className="text-xs font-normal">مادة</span>
+              </div>
+              <div className="mt-1 text-[11px] text-blue-800">
+                {activeFilter === 'BARCODE_1_1000' ? (
+                  <span className="text-blue-950 font-bold bg-blue-200/70 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                    <Filter className="w-3 h-3" />
+                    تصفية مفعلة
+                  </span>
+                ) : (
+                  'المواد المرقمة 1-1000'
+                )}
+              </div>
+            </button>
           </div>
 
           {/* Search & Supplier Filter Bar */}
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-2 w-full md:w-auto flex-1 max-w-lg">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="بحث بالاسم أو الباركود..."
-                  className="w-full pl-3 pr-9 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 placeholder-slate-400 focus:border-indigo-600 focus:bg-white focus:outline-hidden"
-                />
-              </div>
+          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center gap-2">
+            {/* 1. Main Wide Search Input */}
+            <div className="relative flex-1 min-w-[240px]">
+              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="بحث بالاسم أو الباركود..."
+                className="w-full pl-8 pr-9 h-9 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 placeholder-slate-400 focus:border-indigo-600 focus:bg-white focus:outline-hidden transition-all"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute left-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  title="مسح البحث"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
 
-              {/* Camera Barcode Scanner */}
+            {/* 2. Compact Search Tools: Camera, Voice, Smart Assistant */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* Camera Scanner */}
               <button
                 type="button"
                 onClick={() => setShowCameraScanner(true)}
-                className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-black flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 shadow-2xs"
+                className="h-9 px-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300/80 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs transition-all"
                 title="مسح الباركود بكاميرا الجهاز (Webcam Scanner)"
               >
-                <Camera className="w-4 h-4 text-emerald-600" />
-                <span className="hidden sm:inline">كاميرا 📷</span>
+                <Camera className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="hidden sm:inline">كاميرا</span>
               </button>
 
               {/* Voice Search */}
@@ -646,36 +760,39 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                   setSmartSearchAutoVoice(true);
                   setShowSmartSearch(true);
                 }}
-                className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-xs font-black flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 shadow-2xs"
-                title="البحث الصوتي"
+                className="h-9 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs transition-all"
+                title="البحث الصوتي الذكي"
               >
-                <Mic className="w-4 h-4 text-rose-600 animate-pulse" />
-                <span className="hidden sm:inline">صوتي 🎙️</span>
+                <Mic className="w-3.5 h-3.5 text-rose-600 animate-pulse" />
+                <span className="hidden sm:inline">صوتي</span>
               </button>
 
-              {/* Smart Clinical Search */}
+              {/* Smart Assistant */}
               <button
                 type="button"
                 onClick={() => {
                   setSmartSearchAutoVoice(false);
                   setShowSmartSearch(true);
                 }}
-                className="p-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-black flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 shadow-2xs"
-                title="مساعد ذكي"
+                className="h-9 px-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs transition-all"
+                title="مساعد البحث الذكي والسريري"
               >
-                <Sparkles className="w-4 h-4 text-indigo-600" />
+                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
                 <span className="hidden md:inline">مساعد ذكي</span>
               </button>
+            </div>
 
+            {/* 3. Primary Actions (Add & Auto-Number) */}
+            <div className="flex items-center gap-1.5 shrink-0">
               {/* Add New Unregistered Medicine Button */}
               <button
                 type="button"
                 onClick={() => setShowAddMedModal(true)}
-                className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 shadow-xs"
-                title="إضافة دواء جديد"
+                className="h-9 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center gap-1 cursor-pointer active:scale-95 shadow-xs transition-all"
+                title="إضافة دواء جديد إلى المخزن"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">دواء جديد +</span>
+                <span>دواء جديد</span>
               </button>
 
               {/* Auto Assign Short Barcodes Button */}
@@ -683,24 +800,56 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                 <button
                   type="button"
                   onClick={handleAutoAssignBarcodes}
-                  className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shrink-0 cursor-pointer active:scale-95 shadow-xs animate-in fade-in"
+                  className="h-9 px-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-xs transition-all animate-in fade-in"
                   title="توليد أرقام تسلسلية تلقائية (1، 2، 3...) لكل المواد التي لا تحتوي على باركود"
                 >
                   <Barcode className="w-3.5 h-3.5 text-purple-200" />
-                  <span>ترقيم تلقائي ({noBarcodeCount}) ⚡</span>
+                  <span>ترقيم تلقائي ({noBarcodeCount})</span>
                 </button>
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 focus-within:border-amber-500 focus-within:bg-white transition-all">
-                <MapPin className="w-4 h-4 text-amber-600 shrink-0" />
+            {/* 4. Filters Group (Barcode 1-1000, Shelf, Supplier) */}
+            <div className="flex items-center gap-1.5 shrink-0 flex-wrap sm:flex-nowrap">
+              {/* Barcode 1-1000 Quick Filter Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (activeFilter === 'BARCODE_1_1000') {
+                    setActiveFilter('ALL');
+                  } else {
+                    setActiveFilter('BARCODE_1_1000');
+                    setBarcodeSortOrder('asc');
+                  }
+                }}
+                className={`h-9 px-2.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer active:scale-95 border transition-all ${
+                  activeFilter === 'BARCODE_1_1000'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-400/40'
+                    : 'bg-blue-50/90 hover:bg-blue-100 text-blue-800 border-blue-200'
+                }`}
+                title="فلتر سريع: إظهار المواد ذات الباركود من 1 إلى 1000 فقط"
+              >
+                <Barcode className="w-3.5 h-3.5" />
+                <span>1-1000</span>
+                <span
+                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                    activeFilter === 'BARCODE_1_1000' ? 'bg-white/20 text-white' : 'bg-blue-200 text-blue-900'
+                  }`}
+                >
+                  {barcode1to1000Count}
+                </span>
+                {activeFilter === 'BARCODE_1_1000' && <X className="w-3 h-3 text-white/80" />}
+              </button>
+
+              {/* Shelf Filter */}
+              <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2 h-9 focus-within:border-amber-500 focus-within:bg-white transition-all">
+                <MapPin className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                 <input
                   type="text"
                   value={shelfFilter}
                   onChange={(e) => setShelfFilter(e.target.value)}
                   placeholder="الرف..."
-                  className="w-full md:w-44 text-xs font-bold text-slate-800 placeholder:text-slate-400 bg-transparent focus:outline-hidden"
+                  className="w-20 sm:w-28 text-xs font-bold text-slate-800 placeholder:text-slate-400 bg-transparent focus:outline-hidden"
                 />
                 {shelfFilter && (
                   <button
@@ -713,12 +862,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                 )}
               </div>
 
-              <div className="flex items-center gap-2 w-full md:w-auto">
-                <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
+              {/* Supplier Filter */}
+              <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2 h-9 focus-within:border-indigo-600 focus-within:bg-white transition-all">
+                <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 <select
                   value={selectedSupplierId}
                   onChange={(e) => setSelectedSupplierId(e.target.value)}
-                  className="w-full md:w-56 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:border-indigo-600 focus:bg-white focus:outline-hidden"
+                  className="w-28 sm:w-36 text-xs font-bold text-slate-800 bg-transparent focus:outline-hidden cursor-pointer"
                 >
                   <option value="">كل المذاخر</option>
                   {suppliers.map((s) => (
@@ -813,7 +963,32 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                 <thead className="bg-slate-50 text-[11px] text-slate-500 font-black uppercase tracking-wider border-b border-slate-100">
                   <tr>
                     <th className="p-4">الدواء والرف</th>
-                    <th className="p-4">الباركود</th>
+                    <th
+                      onClick={() => setBarcodeSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                      className="p-4 cursor-pointer hover:bg-slate-100 transition-colors select-none group"
+                      title="انقر للترتيب تصاعدياً أو تنازلياً حسب الباركود"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>الباركود</span>
+                        {activeFilter === 'BARCODE_1_1000' ? (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded-md text-[10px] font-black font-mono">
+                            {barcodeSortOrder === 'asc' ? (
+                              <>
+                                <ArrowUp className="w-2.5 h-2.5" />
+                                <span>تصاعدي (1 ➔ 1000)</span>
+                              </>
+                            ) : (
+                              <>
+                                <ArrowDown className="w-2.5 h-2.5" />
+                                <span>تنازلي (1000 ➔ 1)</span>
+                              </>
+                            )}
+                          </span>
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-400 group-hover:text-indigo-600 transition-colors" />
+                        )}
+                      </div>
+                    </th>
                     <th className="p-4">الرصيد</th>
                     <th className="p-4">سعر البيع</th>
                     <th className="p-4">الوجبات</th>
@@ -1142,8 +1317,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                       type="number"
                       min={0}
                       step={1}
-                      value={editForm.officialPricePack}
-                      onChange={(e) => setEditForm({ ...editForm, officialPricePack: Number(e.target.value) })}
+                      value={editForm.officialPricePack || ''}
+                      onChange={(e) => {
+                        const val = Number(e.target.value) || 0;
+                        const units = Number(editingItem?.unitsPerPack) || 1;
+                        setEditForm((prev) => ({
+                          ...prev,
+                          officialPricePack: val,
+                          officialPriceUnit: units > 1 ? calculateStripPrice(val, units) : val,
+                        }));
+                      }}
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900"
                       placeholder="السعر الرسمي للباكيت"
                     />
@@ -1154,8 +1337,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                       type="number"
                       min={0}
                       step={1}
-                      value={editForm.officialPriceUnit}
-                      onChange={(e) => setEditForm({ ...editForm, officialPriceUnit: Number(e.target.value) })}
+                      value={editForm.officialPriceUnit || ''}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, officialPriceUnit: Number(e.target.value) || 0 }))}
                       className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900"
                       placeholder="السعر الرسمي للشريط"
                     />
@@ -1174,9 +1357,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                       type="number"
                       min={0}
                       step={1}
-                      value={editForm.sellingPricePack}
-                      onChange={(e) => setEditForm({ ...editForm, sellingPricePack: Number(e.target.value) })}
+                      value={editForm.sellingPricePack || ''}
+                      onChange={(e) => {
+                        const val = Number(e.target.value) || 0;
+                        const units = Number(editingItem?.unitsPerPack) || 1;
+                        setEditForm((prev) => ({
+                          ...prev,
+                          sellingPricePack: val,
+                          sellingPriceUnit: units > 1 ? calculateStripPrice(val, units) : val,
+                        }));
+                      }}
                       className="w-full px-3 py-2 bg-white border border-indigo-300 rounded-xl text-xs font-mono font-black text-indigo-950"
+                      placeholder="سعر بيع الباكيت"
                       required
                     />
                   </div>
@@ -1186,21 +1378,22 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                       type="number"
                       min={0}
                       step={1}
-                      value={editForm.sellingPriceUnit}
-                      onChange={(e) => setEditForm({ ...editForm, sellingPriceUnit: Number(e.target.value) })}
+                      value={editForm.sellingPriceUnit || ''}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, sellingPriceUnit: Number(e.target.value) || 0 }))}
                       className="w-full px-3 py-2 bg-white border border-indigo-300 rounded-xl text-xs font-mono font-black text-indigo-950"
+                      placeholder="سعر بيع الشريط"
                       required
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Shelf Location & Grid Coordinates */}
+              {/* Shelf Location */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-black text-slate-800 flex items-center gap-1">
                     <MapPin className="w-3.5 h-3.5 text-amber-600" />
-                    موقع الرف والتخزين (Grid Coordinates):
+                    موقع الرف والتخزين:
                   </label>
                   {editForm.shelfLocation && (
                     <button
@@ -1217,84 +1410,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                   type="text"
                   value={editForm.shelfLocation}
                   onChange={(e) => setEditForm({ ...editForm, shelfLocation: e.target.value })}
-                  placeholder="مثال: A-01 أو B-03 أو ❄️ ثلاجة"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-black text-slate-900 focus:bg-white focus:border-indigo-600"
+                  placeholder="مثال: A-01 أو B-03 أو ❄️ ثلاجة أو درج 5"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-indigo-600"
                 />
-
-                {/* Quick Coordinate Generator */}
-                <div className="mt-2 p-2.5 bg-slate-50 rounded-2xl border border-slate-200/90 space-y-2">
-                  <span className="text-[10px] font-bold text-slate-500 block">
-                    ⚡ مولّد الإحداثيات السريع للرفوف:
-                  </span>
-
-                  {/* 1. Cabinets / Sections */}
-                  <div className="flex items-center gap-1 flex-wrap">
-                    <span className="text-[10px] text-slate-400 font-bold ml-1">الخزانة:</span>
-                    {['A', 'B', 'C', 'D', 'E', 'G', 'H', '❄️ ثلاجة', 'مخزن'].map((cab) => (
-                      <button
-                        key={cab}
-                        type="button"
-                        onClick={() => {
-                          if (cab.includes('ثلاجة')) {
-                            setEditForm({ ...editForm, shelfLocation: '❄️ ثلاجة' });
-                          } else if (cab === 'مخزن') {
-                            setEditForm({ ...editForm, shelfLocation: 'مخزن-01' });
-                          } else {
-                            const curr = editForm.shelfLocation || '';
-                            const parts = curr.split('-');
-                            const newShelf = parts[1] || '01';
-                            setEditForm({ ...editForm, shelfLocation: `${cab}-${newShelf}` });
-                          }
-                        }}
-                        className="px-2 py-1 bg-white hover:bg-amber-100 hover:text-amber-900 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700 cursor-pointer shadow-2xs transition-all active:scale-95"
-                      >
-                        {cab}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* 2. Shelves */}
-                  <div className="flex items-center gap-1 flex-wrap">
-                    <span className="text-[10px] text-slate-400 font-bold ml-1">الرف:</span>
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map((num) => {
-                      const numStr = String(num).padStart(2, '0');
-                      return (
-                        <button
-                          key={num}
-                          type="button"
-                          onClick={() => {
-                            const curr = editForm.shelfLocation || 'A-01';
-                            const cab = curr.split('-')[0] || 'A';
-                            setEditForm({ ...editForm, shelfLocation: `${cab}-${numStr}` });
-                          }}
-                          className="px-2 py-1 bg-white hover:bg-amber-100 hover:text-amber-900 border border-slate-200 rounded-lg text-[10px] font-mono font-bold text-slate-700 cursor-pointer shadow-2xs transition-all active:scale-95"
-                        >
-                          {num}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* 3. Presets & Free text tip */}
-                  <div className="flex items-center justify-between gap-1 flex-wrap pt-1.5 border-t border-slate-200/60">
-                    <div className="flex items-center gap-1 flex-wrap">
-                      <span className="text-[10px] text-slate-400 font-bold ml-1">شائع:</span>
-                      {['A-01', 'A-02', 'B-01', 'B-02', 'C-01', '❄️ ثلاجة', 'درج القطرات'].map((preset) => (
-                        <button
-                          key={preset}
-                          type="button"
-                          onClick={() => setEditForm({ ...editForm, shelfLocation: preset })}
-                          className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-md text-[9px] font-bold cursor-pointer transition-all"
-                        >
-                          {preset}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <p className="text-[10px] text-slate-500 font-medium pt-0.5">
-                    💡 يمكنك كتابة أي رقم أو اسم رف تريده بحرية في الحقل أعلاه بدون قيود (مثال: A-15 أو مخزن-3 أو درج 8).
-                  </p>
-                </div>
               </div>
 
               <div>

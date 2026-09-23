@@ -64,6 +64,7 @@ interface TableRowItem {
   shelfLocation?: string;
   hasPreviousBatch?: boolean;
   showExtraFields?: boolean;
+  hasMissingExpiry?: boolean;
 }
 
 export const BulkStockEntryView: React.FC = () => {
@@ -146,16 +147,19 @@ export const BulkStockEntryView: React.FC = () => {
     const trimmed = line.trim();
     if (!trimmed) return null;
 
+    // Convert Arabic/Eastern digits (٠-٩) to Standard digits (0-9)
+    const normalizedLine = trimmed.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+
     // Detect separator: Tab, Semicolon, Comma, or multi-space
     let sep = '\t';
-    if (trimmed.includes('\t')) sep = '\t';
-    else if (trimmed.includes(';') && !trimmed.includes(',')) sep = ';';
-    else if (trimmed.includes(',')) sep = ',';
+    if (normalizedLine.includes('\t')) sep = '\t';
+    else if (normalizedLine.includes(';') && !normalizedLine.includes(',')) sep = ';';
+    else if (normalizedLine.includes(',')) sep = ',';
 
-    let cells = trimmed.split(sep).map((c) => c.trim().replace(/^["']|["']$/g, '').trim());
+    let cells = normalizedLine.split(sep).map((c) => c.trim().replace(/^["']|["']$/g, '').trim());
     if (cells.length < 2) {
-      if (trimmed.split(/\s{2,}/).length >= 2) {
-        cells = trimmed.split(/\s{2,}/).map((c) => c.trim());
+      if (normalizedLine.split(/\s{2,}/).length >= 2) {
+        cells = normalizedLine.split(/\s{2,}/).map((c) => c.trim());
       } else {
         return null;
       }
@@ -163,7 +167,7 @@ export const BulkStockEntryView: React.FC = () => {
 
     // Check if this row is a header row (e.g. contains words like 'باركود', 'المادة', 'السعر')
     const joined = cells.join(' ');
-    if (/(الباركود|المادة|اسم المادة|السعر|العدد|الكمية|المجموع|الخصم|تاريخ|Barcode|Trade Name|Price|Qty)/i.test(joined)) {
+    if (/(الباركود|المادة|اسم المادة|السعر|العدد|الكمية|المجموع|الخصم|تاريخ|Barcode|Trade Name|Price|Qty|EXP)/i.test(joined)) {
       return null;
     }
 
@@ -194,12 +198,74 @@ export const BulkStockEntryView: React.FC = () => {
       }
     }
 
-    // 3. Identify Medicine Name: Cell with the most Arabic/English letters
+    // 3. Strict Expiry Date Extraction (MM/YY, MM/YYYY, MM\YY, MM\YYYY, MM-YY, YYYY-MM, etc.)
+    let expiryMonth = 12;
+    let expiryYear = currentYear + 2;
+    let expiryIdx = -1;
+    let expiryIdx2 = -1;
+    let hasExplicitExpiry = false;
+
+    for (let i = 0; i < cells.length; i++) {
+      if (i === barcodeIdx || i === discountIdx) continue;
+      const cellText = cells[i].trim();
+
+      // Format A: MM/YY, MM/YYYY, MM\YY, MM\YYYY, MM-YY, MM.YY, etc. (e.g., 7\27, 07/27, 07/2027, 12\40, 4\31)
+      const matchA = cellText.match(/^0?([1-9]|1[0-2])\s*[\/\-\\.]\s*(20\d{2}|\d{2})$/);
+      if (matchA) {
+        const m = parseInt(matchA[1], 10);
+        let y = parseInt(matchA[2], 10);
+        if (y < 100) y = 2000 + y; // e.g. 27 -> 2027, 31 -> 2031, 40 -> 2040
+        if (y >= 2024 && y <= 2045) {
+          expiryMonth = m;
+          expiryYear = y;
+          expiryIdx = i;
+          hasExplicitExpiry = true;
+          break;
+        }
+      }
+
+      // Format B: YYYY/MM, YYYY-MM, YYYY\MM (e.g. 2027/07, 2027-07)
+      const matchB = cellText.match(/^(20\d{2})\s*[\/\-\\.]\s*0?([1-9]|1[0-2])$/);
+      if (matchB) {
+        const y = parseInt(matchB[1], 10);
+        const m = parseInt(matchB[2], 10);
+        if (y >= 2024 && y <= 2045) {
+          expiryYear = y;
+          expiryMonth = m;
+          expiryIdx = i;
+          hasExplicitExpiry = true;
+          break;
+        }
+      }
+    }
+
+    // Fallback: Two adjacent numeric cells where cell 1 is 1-12 and cell 2 is 2024-2045 or 24-45
+    if (!hasExplicitExpiry) {
+      for (let i = 0; i < cells.length - 1; i++) {
+        if (i === barcodeIdx || i === discountIdx) continue;
+        const c1 = parseInt(cells[i].replace(/[^\d]/g, ''), 10);
+        const c2 = parseInt(cells[i + 1].replace(/[^\d]/g, ''), 10);
+        if (c1 >= 1 && c1 <= 12) {
+          let y = c2;
+          if (y < 100 && y >= 24 && y <= 45) y = 2000 + y;
+          if (y >= 2024 && y <= 2045) {
+            expiryMonth = c1;
+            expiryYear = y;
+            expiryIdx = i;
+            expiryIdx2 = i + 1;
+            hasExplicitExpiry = true;
+            break;
+          }
+        }
+      }
+    }
+
+    // 4. Identify Medicine Name: Cell with the most Arabic/English letters
     let tradeName = '';
     let nameIdx = -1;
     let maxLetters = 0;
     for (let i = 0; i < cells.length; i++) {
-      if (i === barcodeIdx || i === discountIdx) continue;
+      if (i === barcodeIdx || i === discountIdx || i === expiryIdx || i === expiryIdx2) continue;
       const letters = cells[i].replace(/[^a-zA-Z\u0600-\u06FF]/g, '');
       if (letters.length > maxLetters && !/^(د\.ع|IQD|USD|\$|pack|box|علبة|قطعة)$/i.test(cells[i].trim())) {
         maxLetters = letters.length;
@@ -211,7 +277,7 @@ export const BulkStockEntryView: React.FC = () => {
     // Fallback for name if no letters
     if (!tradeName) {
       for (let i = 0; i < cells.length; i++) {
-        if (i !== barcodeIdx && i !== discountIdx && cells[i].length > 0) {
+        if (i !== barcodeIdx && i !== discountIdx && i !== expiryIdx && i !== expiryIdx2 && cells[i].length > 0) {
           tradeName = cells[i].trim();
           nameIdx = i;
           break;
@@ -219,10 +285,10 @@ export const BulkStockEntryView: React.FC = () => {
       }
     }
 
-    // 4. Collect remaining numeric cells (for qty, price, total)
+    // 5. Collect remaining numeric cells (for qty, price, total)
     const numericCells: { idx: number; val: number }[] = [];
     for (let i = 0; i < cells.length; i++) {
-      if (i === barcodeIdx || i === discountIdx || i === nameIdx) continue;
+      if (i === barcodeIdx || i === discountIdx || i === nameIdx || i === expiryIdx || i === expiryIdx2) continue;
       const cleaned = cells[i].replace(/[^\d.]/g, '');
       const n = parseFloat(cleaned);
       if (!isNaN(n) && n > 0) {
@@ -230,34 +296,45 @@ export const BulkStockEntryView: React.FC = () => {
       }
     }
 
-    // In Iraq, wholesale prices are >= 250 IQD
-    const priceCandidates = numericCells.filter((c) => c.val >= 250).sort((a, b) => a.val - b.val);
-    const smallCandidates = numericCells.filter((c) => c.val < 250);
+    // Exclude row index numbers matching 1, 2, 3... at position 0
+    const filteredNumerics = numericCells.filter((c) => !(c.idx === 0 && c.val === lineIndex + 1));
+
+    // In Iraq, wholesale unit prices are >= 250 IQD
+    const priceCells = filteredNumerics.filter((c) => c.val >= 250);
+    const smallCandidates = filteredNumerics.filter((c) => c.val < 250);
 
     let purchasePrice = 0;
+    let explicitSellingPrice = 0;
     let qty = 1;
 
-    if (priceCandidates.length > 0) {
-      // Smallest candidate >= 250 is the unit purchase price (the other is usually total = qty * price)
-      purchasePrice = priceCandidates[0].val;
+    if (priceCells.length >= 2) {
+      // First price cell is purchase price
+      purchasePrice = priceCells[0].val;
+
+      // Check if there is an explicit selling price column (a distinct price > purchasePrice)
+      for (let k = 1; k < priceCells.length; k++) {
+        if (priceCells[k].val > purchasePrice) {
+          explicitSellingPrice = priceCells[k].val;
+          break;
+        }
+      }
+    } else if (priceCells.length === 1) {
+      purchasePrice = priceCells[0].val;
+    } else if (filteredNumerics.length > 0) {
+      purchasePrice = filteredNumerics[filteredNumerics.length - 1].val;
     }
 
-    // Filter out sequence number matching 1, 2, 3...
-    const nonSeqSmalls = smallCandidates.filter((s) => s.val !== lineIndex + 1);
-    if (nonSeqSmalls.length > 0) {
-      qty = Math.max(1, Math.round(nonSeqSmalls[0].val));
-    } else if (smallCandidates.length > 0) {
+    // Check quantity from small candidates (< 250)
+    if (smallCandidates.length > 0) {
       qty = Math.max(1, Math.round(smallCandidates[0].val));
-    }
-
-    if (purchasePrice === 0 && numericCells.length > 0) {
-      purchasePrice = numericCells[numericCells.length - 1].val;
     }
 
     if (!tradeName && !barcode) return null;
 
-    // Standard pharmacy selling price: +20% markup rounded to nearest 250 IQD
-    const sellingPrice = purchasePrice > 0 ? roundTo250(Math.round(purchasePrice * 1.2)) : 0;
+    // Selling price: Use explicit selling price if imported from Excel, otherwise default to +20% markup
+    const sellingPrice = explicitSellingPrice > 0 
+      ? roundTo250(explicitSellingPrice) 
+      : (purchasePrice > 0 ? roundTo250(Math.round(purchasePrice * 1.2)) : 0);
 
     return {
       tempId: `import-${Date.now()}-${lineIndex}-${Math.random().toString(36).substring(2, 6)}`,
@@ -274,8 +351,9 @@ export const BulkStockEntryView: React.FC = () => {
       sellingPriceUnit: sellingPrice,
       officialPricePack: sellingPrice,
       officialPriceUnit: sellingPrice,
-      expiryMonth: 12,
-      expiryYear: currentYear + 2,
+      expiryMonth,
+      expiryYear,
+      hasMissingExpiry: !hasExplicitExpiry,
       isNewMedicine: true,
     };
   };
@@ -1861,7 +1939,7 @@ export const BulkStockEntryView: React.FC = () => {
                   <li>أو ارفع ملف <strong>.csv</strong> مباشرة</li>
                 </ol>
                 <div className="mt-2 pt-2 border-t border-blue-200">
-                  <span className="font-bold">الأعمدة المتوقعة:</span> رقم (اختياري) | الباركود | اسم المادة | الكمية | سعر الشراء | الخصم%
+                  <span className="font-bold">الأعمدة المدعومة تلقائياً وذكياً:</span> الباركود | اسم المادة | الكمية | سعر الشراء | الخصم% | <strong>الاكسباير (مثل: 07/27 أو 07/2027)</strong>
                 </div>
               </div>
 
@@ -1889,7 +1967,7 @@ export const BulkStockEntryView: React.FC = () => {
               <textarea
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
-                placeholder={`الصق هنا بيانات الفاتورة من Excel (Ctrl+V)...\n\nمثال:\n1\t8809517414315\tMedicube ZERO PORE PAD MILD 155g\t1\t19000\t0\t19000\n2\t8806407370190\tANUA Azelaic Acid Serum\t1\t20000\t0\t20000`}
+                placeholder={`الصق هنا بيانات الفاتورة من Excel (Ctrl+V)...\n\nمثال:\n1\t8809517414315\tMedicube ZERO PORE PAD MILD 155g\t1\t19000\t0\t7/27\n2\t8809640737190\tANUA Azelaic Acid Serum\t1\t20000\t0\t4/31`}
                 rows={10}
                 dir="ltr"
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono text-slate-800 focus:outline-none focus:border-emerald-500 focus:bg-white resize-y"
@@ -1904,7 +1982,7 @@ export const BulkStockEntryView: React.FC = () => {
                       <span>معاينة التعرف الذكي (تم التعرف على {previewRows.length} صنف):</span>
                     </span>
                     <span className="text-[10px] text-emerald-700 font-bold bg-white px-2 py-0.5 rounded-md border border-emerald-200">
-                      معاينة أول {Math.min(4, previewRows.length)} أصناف
+                      معاينة أول {Math.min(6, previewRows.length)} أصناف
                     </span>
                   </div>
 
@@ -1919,18 +1997,26 @@ export const BulkStockEntryView: React.FC = () => {
                           <th className="p-1.5 text-left">شراء الباكيت</th>
                           <th className="p-1.5 text-left">بيع مقترح</th>
                           <th className="p-1.5 text-center">الخصم</th>
+                          <th className="p-1.5 text-center">الاكسباير</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-bold text-slate-800">
-                        {previewRows.slice(0, 4).map((row, pIdx) => (
+                        {previewRows.slice(0, 6).map((row, pIdx) => (
                           <tr key={pIdx} className="hover:bg-slate-50">
                             <td className="p-1.5 text-center text-slate-400 font-mono">{pIdx + 1}</td>
-                            <td className="p-1.5 font-bold text-slate-900 max-w-[200px] truncate">{row.tradeName}</td>
+                            <td className="p-1.5 font-bold text-slate-900 max-w-[180px] truncate">{row.tradeName}</td>
                             <td className="p-1.5 font-mono text-indigo-700">{row.barcode || '-'}</td>
                             <td className="p-1.5 text-center font-black text-slate-900">{row.quantityPacks}</td>
                             <td className="p-1.5 text-left font-mono font-black text-slate-900">{row.purchasePricePack.toLocaleString()} د.ع</td>
                             <td className="p-1.5 text-left font-mono font-black text-emerald-700">{row.sellingPricePack.toLocaleString()} د.ع</td>
                             <td className="p-1.5 text-center font-mono text-rose-600">{row.discountPercent > 0 ? `${row.discountPercent}%` : '0%'}</td>
+                            <td className="p-1.5 text-center font-mono font-bold">
+                              {row.hasMissingExpiry ? (
+                                <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] rounded border border-amber-300 inline-block">⚠️ يجب تحديده</span>
+                              ) : (
+                                <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 inline-block">{String(row.expiryMonth).padStart(2, '0')}/{row.expiryYear}</span>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

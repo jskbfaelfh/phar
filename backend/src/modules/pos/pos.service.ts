@@ -4,6 +4,7 @@ import {
   NotFoundException,
   ForbiddenException,
   UnauthorizedException,
+  HttpException,
   Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -467,12 +468,17 @@ export class PosService {
           },
           {
             isolationLevel: 'ReadCommitted' as any,
-            maxWait: 15000,
+            maxWait: 30000,
             timeout: 60000,
           },
         );
         break; // Success, exit retry loop
       } catch (err: any) {
+        // Immediately propagate intentional domain/business exceptions
+        if (err instanceof HttpException) {
+          throw err;
+        }
+
         // Catch concurrent offline_id collision
         if (dto.offlineId && (err.message?.includes('sales_offline_id') || err.message?.includes('offline_id'))) {
           this.logger.warn(`Concurrent offline_id conflict caught. Fetching existing sale.`);
@@ -499,6 +505,21 @@ export class PosService {
               isIdempotentReplay: true,
             };
           }
+        }
+
+        // Retry on transient transaction acquisition / pool / lock concurrency errors
+        if (
+          (err.code === 'P2028' ||
+            err.code === 'P2034' ||
+            err.message?.includes('Transaction API error') ||
+            err.message?.includes('could not obtain lock') ||
+            err.message?.includes('deadlock') ||
+            err.message?.includes('lock timeout')) &&
+          attempt < 3
+        ) {
+          this.logger.warn(`Transaction pool/concurrency collision on attempt ${attempt}. Retrying in ${attempt * 200}ms...`);
+          await new Promise((r) => setTimeout(r, attempt * 200));
+          continue;
         }
 
         // Retry on invoice_number collision (only when generating random invoice numbers)

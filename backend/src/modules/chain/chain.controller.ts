@@ -7,6 +7,8 @@ import {
   Query,
   UseGuards,
   ParseUUIDPipe,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ChainService } from './chain.service';
@@ -14,6 +16,7 @@ import {
   LinkBranchDto,
   CreateStockTransferDto,
   ReceiveStockTransferDto,
+  CancelStockTransferDto,
 } from './dto/chain.dto';
 import { SubscriptionGuard } from '../../common/guards/subscription.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -63,7 +66,11 @@ export class ChainController {
 
   @Post('transfers/:id/cancel')
   @Roles('OWNER')
-  async cancelStockTransfer(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+  @HttpCode(HttpStatus.OK)
+  async cancelStockTransfer(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() _dto?: CancelStockTransferDto,
+  ) {
     return this.chainService.cancelStockTransfer(id);
   }
 }

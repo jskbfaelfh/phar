@@ -84,3 +84,9 @@ export class SwitchBranchDto {
   @IsNotEmpty({ message: 'الفرع المستهدف مطلوب' })
   targetTenantId: string;
 }
+
+export class CancelStockTransferDto {
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}

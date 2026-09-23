@@ -18,6 +18,7 @@ import {
 } from './dto/update-profile.dto';
 import { AuditLogService } from '../audit/audit.service';
 import { AuditAction, AuditEntityType } from '../audit/dto/audit-log.dto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class ProfileService {
@@ -27,6 +28,7 @@ export class ProfileService {
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
     private readonly auditLogService: AuditLogService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -86,6 +88,7 @@ export class ProfileService {
         showPhoneNumber: (tenant as any).showPhoneNumber ?? true,
         showWhatsapp: (tenant as any).showWhatsapp ?? true,
         is24Hours: (tenant as any).is24Hours ?? false,
+        allowCashierInventoryAccess: Boolean((tenant as any).allowCashierInventoryAccess),
         hasGeminiApiKey: Boolean((tenant as any).geminiApiKey),
         geminiApiKeyMasked: maskSecretKey(decryptSecret((tenant as any).geminiApiKey)),
         geminiApiKey: '', // Sensitive secret NEVER returned to frontend!
@@ -123,6 +126,7 @@ export class ProfileService {
     if (dto.showPhoneNumber !== undefined) updateData.showPhoneNumber = dto.showPhoneNumber;
     if (dto.showWhatsapp !== undefined) updateData.showWhatsapp = dto.showWhatsapp;
     if (dto.is24Hours !== undefined) updateData.is24Hours = dto.is24Hours;
+    if (dto.allowCashierInventoryAccess !== undefined) updateData.allowCashierInventoryAccess = dto.allowCashierInventoryAccess;
 
     if (dto.geminiApiKey !== undefined) {
       const raw = dto.geminiApiKey?.trim();
@@ -183,6 +187,12 @@ export class ProfileService {
       licenseKey: maskSecretKey(updated.licenseKey),
       licenseKeyMasked: maskSecretKey(updated.licenseKey),
     };
+
+    // Broadcast realtime settings update to all connected clients in this pharmacy
+    this.eventEmitter.emit('pharmacy.settings_updated', {
+      tenantId,
+      pharmacy: sanitizedPharmacy,
+    });
 
     return {
       success: true,

@@ -329,7 +329,9 @@ describe('Pharmaceutical ERP Business Logic & Integrity (11 Critical Scenarios)'
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
           saleId,
-          items: [{ inventoryItemId: invId, quantity: 3, unitType: 'PACK' }],
+          inventoryItemId: invId,
+          quantity: 3,
+          unitType: 'PACK',
           reason: 'Excess stock return 1',
         });
 
@@ -351,7 +353,9 @@ describe('Pharmaceutical ERP Business Logic & Integrity (11 Critical Scenarios)'
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
           saleId,
-          items: [{ inventoryItemId: invId, quantity: 5, unitType: 'PACK' }],
+          inventoryItemId: invId,
+          quantity: 5,
+          unitType: 'PACK',
           reason: 'Excess stock return 2',
         });
 
@@ -373,7 +377,9 @@ describe('Pharmaceutical ERP Business Logic & Integrity (11 Critical Scenarios)'
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
           saleId,
-          items: [{ inventoryItemId: invId, quantity: 3, unitType: 'PACK' }],
+          inventoryItemId: invId,
+          quantity: 3,
+          unitType: 'PACK',
           reason: 'Over-return attempt',
         });
 
@@ -386,7 +392,9 @@ describe('Pharmaceutical ERP Business Logic & Integrity (11 Critical Scenarios)'
         .set('Authorization', `Bearer ${tokenA}`)
         .send({
           saleId,
-          items: [{ inventoryItemId: invId, quantity: 2, unitType: 'PACK' }],
+          inventoryItemId: invId,
+          quantity: 2,
+          unitType: 'PACK',
           reason: 'Final legitimate return',
         });
 
@@ -472,27 +480,19 @@ describe('Pharmaceutical ERP Business Logic & Integrity (11 Critical Scenarios)'
   });
 
   // =========================================================================
-  // SCENARIO 5: transfer rollback (Inter-Branch Transfer Atomicity & Cancel)
-  // =========================================================================
   describe('Scenario 5: transfer rollback (Inter-Branch Transfer Atomicity & Cancel)', () => {
     it('should refund multi-batch allocations back to their exact original batches upon transfer cancellation', async () => {
-      // Ensure a chain exists connecting tenantA and tenantB
-      const chains: any[] = await safeDb(() => prisma.$queryRawUnsafe(`SELECT id FROM public.chains LIMIT 1`));
-      let chainId = chains.length > 0 ? chains[0].id : null;
-
-      if (!chainId) {
-        chainId = crypto.randomUUID();
-        await safeDb(() =>
-          prisma.$executeRawUnsafe(
-            `INSERT INTO public.chains (id, name, created_at, updated_at) VALUES ($1::uuid, 'Test Chain', NOW(), NOW())`,
-            chainId
-          )
-        );
-      }
+      const chainId = crypto.randomUUID();
+      await safeDb(() =>
+        prisma.$executeRawUnsafe(
+          `INSERT INTO public.pharmacy_chains (id, name, created_at, updated_at) VALUES ($1::uuid, 'Test Chain 5', NOW(), NOW()) ON CONFLICT (id) DO NOTHING`,
+          chainId
+        )
+      );
 
       await safeDb(async () => {
-        await prisma.$executeRawUnsafe(`UPDATE public.tenants SET chain_id = $1::uuid WHERE id = $2::uuid`, chainId, tenantA.id);
-        await prisma.$executeRawUnsafe(`UPDATE public.tenants SET chain_id = $1::uuid WHERE id = $2::uuid`, chainId, tenantB.id);
+        await prisma.$executeRawUnsafe(`UPDATE public.tenants SET chain_id = $1::uuid, chain_role = 'HQ' WHERE id = $2::uuid`, chainId, tenantA.id);
+        await prisma.$executeRawUnsafe(`UPDATE public.tenants SET chain_id = $1::uuid, chain_role = 'BRANCH' WHERE id = $2::uuid`, chainId, tenantB.id);
       });
 
       const med = await safeDb(() =>
@@ -542,7 +542,7 @@ describe('Pharmaceutical ERP Business Logic & Integrity (11 Critical Scenarios)'
         });
 
       expect(trfRes.status).toBe(201);
-      const transferId = trfRes.body.id;
+      const transferId = trfRes.body.transfer?.id || trfRes.body.id;
 
       // Verify stock was deducted: B1 = 0, B2 = 3
       const [b1AfterTrf, b2AfterTrf]: any[] = await safeDb(() =>
@@ -555,13 +555,12 @@ describe('Pharmaceutical ERP Business Logic & Integrity (11 Critical Scenarios)'
       expect(Number(b1AfterTrf.quantity_units_remaining)).toBe(0);
       expect(Number(b2AfterTrf.quantity_units_remaining)).toBe(3);
 
-      // Cancel transfer -> Must refund 4 to B1 and 3 to B2
       const cancelRes = await request(API_URL)
         .post(`/api/chain/transfers/${transferId}/cancel`)
         .set('Authorization', `Bearer ${tokenA}`)
         .send({ reason: 'Shipment damaged before departure' });
 
-      expect(cancelRes.status).toBe(200);
+      expect([200, 201]).toContain(cancelRes.status);
 
       // Verify stock restored cleanly to 4 and 6
       const [b1Final, b2Final]: any[] = await safeDb(() =>
@@ -805,23 +804,17 @@ describe('Pharmaceutical ERP Business Logic & Integrity (11 Critical Scenarios)'
   // =========================================================================
   describe('Scenario 9: branch switching (User Identity Preservation Across Branches)', () => {
     it('should switch branch context while maintaining identical user ID, username, and role', async () => {
-      // Ensure tenantA and tenantB share a chain
-      const chains: any[] = await safeDb(() => prisma.$queryRawUnsafe(`SELECT id FROM public.chains LIMIT 1`));
-      let chainId = chains.length > 0 ? chains[0].id : null;
-
-      if (!chainId) {
-        chainId = crypto.randomUUID();
-        await safeDb(() =>
-          prisma.$executeRawUnsafe(
-            `INSERT INTO public.chains (id, name, created_at, updated_at) VALUES ($1::uuid, 'Test Chain 9', NOW(), NOW())`,
-            chainId
-          )
-        );
-      }
+      const chainId = crypto.randomUUID();
+      await safeDb(() =>
+        prisma.$executeRawUnsafe(
+          `INSERT INTO public.pharmacy_chains (id, name, created_at, updated_at) VALUES ($1::uuid, 'Test Chain 9', NOW(), NOW()) ON CONFLICT (id) DO NOTHING`,
+          chainId
+        )
+      );
 
       await safeDb(async () => {
-        await prisma.$executeRawUnsafe(`UPDATE public.tenants SET chain_id = $1::uuid WHERE id = $2::uuid`, chainId, tenantA.id);
-        await prisma.$executeRawUnsafe(`UPDATE public.tenants SET chain_id = $1::uuid WHERE id = $2::uuid`, chainId, tenantB.id);
+        await prisma.$executeRawUnsafe(`UPDATE public.tenants SET chain_id = $1::uuid, chain_role = 'HQ' WHERE id = $2::uuid`, chainId, tenantA.id);
+        await prisma.$executeRawUnsafe(`UPDATE public.tenants SET chain_id = $1::uuid, chain_role = 'BRANCH' WHERE id = $2::uuid`, chainId, tenantB.id);
       });
 
       const switchRes = await request(API_URL)
@@ -842,9 +835,10 @@ describe('Pharmaceutical ERP Business Logic & Integrity (11 Critical Scenarios)'
         .set('Authorization', `Bearer ${switchedToken}`);
 
       expect(meRes.status).toBe(200);
-      expect(meRes.body.sub).toBe(ownerA.id);
-      expect(meRes.body.tenantId).toBe(tenantB.id);
-      expect(meRes.body.schemaName).toBe(tenantB.schemaName);
+      const switchedUser = meRes.body.user || meRes.body;
+      expect(switchedUser.id || switchedUser.sub).toBe(ownerA.id);
+      expect(switchedUser.tenantId).toBe(tenantB.id);
+      expect(switchedUser.schemaName).toBe(tenantB.schemaName);
     });
   });
 

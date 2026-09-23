@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Body,
   Param,
   Query,
@@ -11,6 +12,7 @@ import {
   UploadedFile,
   BadRequestException,
   Res,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
@@ -23,6 +25,7 @@ import { OcrAiService } from './ocr-ai.service';
 import { InvoiceStorageService } from './invoice-storage.service';
 import { AiUsageLimiterService } from './ai-usage-limiter.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
+import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 
 @Controller('purchases')
 @UseGuards(AuthGuard('jwt'), SubscriptionGuard, RolesGuard)
@@ -205,5 +208,14 @@ export class PurchasesController {
   @Get(':id')
   getPurchaseById(@Request() req: any, @Param('id') id: string) {
     return this.purchasesService.getPurchaseById(req.user.tenantId, id);
+  }
+
+  @Put(':id')
+  updatePurchase(
+    @Request() req: any,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() dto: UpdatePurchaseDto,
+  ) {
+    return this.purchasesService.updatePurchase(req.user.tenantId, id, dto);
   }
 }

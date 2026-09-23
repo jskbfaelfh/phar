@@ -3,7 +3,10 @@ import { io, Socket } from 'socket.io-client';
 import { getAuthToken } from '../api/client';
 
 export function usePharmacyLiveSync(
-  onEventReceived?: (eventType: 'STOCK_UPDATED' | 'SALE_COMPLETED' | 'STOCK_ENTERED', data: any) => void,
+  onEventReceived?: (
+    eventType: 'STOCK_UPDATED' | 'SALE_COMPLETED' | 'STOCK_ENTERED' | 'PHARMACY_SETTINGS_UPDATED',
+    data: any,
+  ) => void,
 ) {
   const [isConnected, setIsConnected] = useState(false);
   const onEventRef = useRef(onEventReceived);
@@ -45,6 +48,10 @@ export function usePharmacyLiveSync(
 
     socket.on('STOCK_ENTERED', (data: any) => {
       if (onEventRef.current) onEventRef.current('STOCK_ENTERED', data);
+    });
+
+    socket.on('PHARMACY_SETTINGS_UPDATED', (data: any) => {
+      if (onEventRef.current) onEventRef.current('PHARMACY_SETTINGS_UPDATED', data);
     });
 
     return () => {

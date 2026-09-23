@@ -48,8 +48,9 @@ model Tenant {
   showSellingPrices  Boolean            @default(true) @map("show_selling_prices")
   showPhoneNumber    Boolean            @default(true) @map("show_phone_number")
   showWhatsapp       Boolean            @default(true) @map("show_whatsapp")
-  is24Hours          Boolean            @default(false) @map("is_24_hours")
-  geminiApiKey       String?            @map("gemini_api_key") @db.Text
+  is24Hours                   Boolean            @default(false) @map("is_24_hours")
+  allowCashierInventoryAccess Boolean            @default(false) @map("allow_cashier_inventory_access")
+  geminiApiKey                String?            @map("gemini_api_key") @db.Text
   chainId            String?            @map("chain_id") @db.Uuid
   chainRole          String?            @default("BRANCH") @map("chain_role") @db.VarChar(50)
   createdAt          DateTime           @default(now()) @map("created_at")
