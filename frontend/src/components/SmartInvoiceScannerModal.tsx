@@ -793,6 +793,18 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
                 <p className="text-xs font-bold text-emerald-800 bg-emerald-50 py-2.5 px-4 rounded-xl border border-emerald-200 inline-block animate-pulse">
                   {processingStage}
                 </p>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep('UPLOAD');
+                      setErrorMsg('تم إلغاء عملية المعالجة.');
+                    }}
+                    className="mt-4 px-5 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    إلغاء المعالجة والرجوع
+                  </button>
+                </div>
               </div>
             </div>
           )}

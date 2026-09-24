@@ -130,14 +130,14 @@ export class ProfileService {
 
     if (dto.geminiApiKey !== undefined) {
       const raw = dto.geminiApiKey?.trim();
-      if (raw && !raw.includes('••••') && !raw.startsWith('•••')) {
+      if (raw && !raw.includes('••••') && !raw.startsWith('•••') && raw !== '__REMOVE__') {
         // New valid key provided
         updateData.geminiApiKey = encryptSecret(raw);
-      } else if (raw === '' || raw === '__REMOVE__') {
+      } else if (raw === '__REMOVE__') {
         // Explicit removal
         updateData.geminiApiKey = null;
       }
-      // If raw contains mask characters (••••), ignore it to preserve existing valid key
+      // If raw is empty or contains mask characters (••••), ignore it to preserve existing valid key
     }
 
     const updated = await this.prisma.tenant.update({
@@ -428,5 +428,67 @@ export class ProfileService {
       success: true,
       message: `تم حذف حساب الكاشير (${rows[0].name}) بنجاح`,
     };
+  }
+
+  /**
+   * Test Gemini API Key connectivity and validity
+   */
+  async testGeminiKey(providedKey?: string): Promise<{
+    success: boolean;
+    message: string;
+    model?: string;
+    maskedKey?: string;
+  }> {
+    const tenantId = this.tenantContext.getTenantId();
+    let keyToTest = providedKey?.trim();
+
+    if (!keyToTest || keyToTest.includes('••••') || keyToTest === '__REMOVE__') {
+      // Fetch saved key from Tenant
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { geminiApiKey: true },
+      });
+      if (tenant?.geminiApiKey) {
+        keyToTest = decryptSecret(tenant.geminiApiKey);
+      }
+    }
+
+    if (!keyToTest) {
+      throw new BadRequestException('لا يوجد مفتاح Gemini محفوظ أو مدخل لفحصه. يرجى لصق المفتاح أولاً.');
+    }
+
+    const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(keyToTest)}`;
+
+    try {
+      const response = await fetch(testUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'ping' }] }],
+          generationConfig: { maxOutputTokens: 5 },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        const errMsg = errorData?.error?.message || `HTTP ${response.status} ${response.statusText}`;
+        if (response.status === 400 || response.status === 403) {
+          throw new BadRequestException(`مفتاح Gemini غير صالح أو غير مفعل: ${errMsg}`);
+        } else if (response.status === 429) {
+          throw new BadRequestException(`المفتاح صالح ولكن تم تجاوز الحصة المتاحة (Rate Limit / Quota): ${errMsg}`);
+        }
+        throw new BadRequestException(`فشل الاتصال بـ Gemini: ${errMsg}`);
+      }
+
+      return {
+        success: true,
+        message: 'تم فحص المفتاح بنجاح! الاتصال بسيرفرات Google Gemini (موديل 2.5 Flash) فعال وجاهز للاستخدام.',
+        model: 'gemini-2.5-flash',
+        maskedKey: maskSecretKey(keyToTest),
+      };
+    } catch (err: any) {
+      if (err instanceof BadRequestException) throw err;
+      throw new BadRequestException(`تعذر الاتصال بسيرفرات Google Gemini: ${err.message}`);
+    }
   }
 }

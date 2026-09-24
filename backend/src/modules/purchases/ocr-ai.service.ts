@@ -173,71 +173,15 @@ export class OcrAiService {
       }
     }
 
-    // 2. Call Google Gemini Vision AI directly (Per-Page extraction to guarantee 100% item coverage)
-    let aiParsedData: any = {
-      invoiceNumber: '',
-      supplierName: '',
-      invoiceDate: '',
-      totalAmount: 0,
-      directDiscountAmount: 0,
-      discountTiers: [],
-      items: [],
-    };
-
+    // 2. Call Google Gemini Vision AI directly with all pages combined in ONE unified batch request
+    let aiParsedData: any;
     try {
-      if (images.length === 1) {
-        aiParsedData = await this.callGeminiVision(apiKey, images[0], 1, 1);
-      } else {
-        this.logger.log(`Processing multi-page invoice: ${images.length} pages sequentially with pacing...`);
-        const pageResults: any[] = [];
-        for (let idx = 0; idx < images.length; idx++) {
-          if (idx > 0) {
-            // Smooth pacing between pages to avoid Google concurrency / burst limits
-            await new Promise((r) => setTimeout(r, 700));
-          }
-          this.logger.log(`Scanning invoice page ${idx + 1} of ${images.length}...`);
-          const res = await this.callGeminiVision(apiKey, images[idx], idx + 1, images.length);
-          pageResults.push(res);
-        }
-
-        for (let i = 0; i < pageResults.length; i++) {
-          const pageData = pageResults[i];
-          if (!pageData) continue;
-
-          this.logger.log(`Page ${i + 1} extracted ${pageData.items?.length || 0} items.`);
-
-          if (!aiParsedData.invoiceNumber && pageData.invoiceNumber) {
-            aiParsedData.invoiceNumber = pageData.invoiceNumber;
-          }
-          if (
-            (!aiParsedData.supplierName || aiParsedData.supplierName === 'مذخر أدوية') &&
-            pageData.supplierName &&
-            pageData.supplierName !== 'مذخر أدوية'
-          ) {
-            aiParsedData.supplierName = pageData.supplierName;
-          }
-          if (!aiParsedData.invoiceDate && pageData.invoiceDate) {
-            aiParsedData.invoiceDate = pageData.invoiceDate;
-          }
-          if (Number(pageData.totalAmount) > Number(aiParsedData.totalAmount)) {
-            aiParsedData.totalAmount = Number(pageData.totalAmount);
-          }
-          if (Number(pageData.directDiscountAmount) > 0) {
-            aiParsedData.directDiscountAmount = Number(pageData.directDiscountAmount);
-          }
-          if (Array.isArray(pageData.discountTiers) && pageData.discountTiers.length > 0) {
-            aiParsedData.discountTiers.push(...pageData.discountTiers);
-          }
-          if (Array.isArray(pageData.items) && pageData.items.length > 0) {
-            aiParsedData.items.push(...pageData.items);
-          }
-        }
-        this.logger.log(`Multi-page combined total items: ${aiParsedData.items.length}`);
-      }
+      this.logger.log(`Processing invoice with ${images.length} page(s) in a single unified AI request...`);
+      aiParsedData = await this.callGeminiVision(apiKey, images);
     } catch (err: any) {
       this.logger.error(`Gemini Vision API error: ${err.message}`);
       throw new BadRequestException(
-        `تعذر تحليل الفاتورة بواسطة الذكاء الاصطناعي: ${err.message || 'تأكد من صحة رمز الـ API ووضوح صورة الفاتورة.'}`,
+        err.message?.startsWith('⚠️') ? err.message : `تعذر تحليل الفاتورة بواسطة الذكاء الاصطناعي: ${err.message || 'تأكد من صحة رمز الـ API ووضوح صورة الفاتورة.'}`,
       );
     }
 
@@ -629,23 +573,30 @@ export class OcrAiService {
   }
 
   /**
-   * Gemini Multimodal Vision AI Model Extractor for a single invoice page
+   * Gemini Multimodal Vision AI Model Extractor for one or multiple invoice pages in a single unified request
    */
   private async callGeminiVision(
     apiKey: string,
-    imageBase64: string,
-    pageNumber: number = 1,
-    totalPages: number = 1,
+    images: string[],
   ): Promise<any> {
-    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '').trim();
+    const imageParts = images.map((img) => ({
+      inlineData: {
+        mimeType: 'image/jpeg',
+        data: img.replace(/^data:image\/\w+;base64,/, '').trim(),
+      },
+    }));
+
+    const pageCountText = images.length > 1
+      ? `There are ${images.length} pages/images attached representing one full invoice. Extract EVERY SINGLE MEDICINE ROW from ALL ${images.length} pages without omitting anything.`
+      : `Extract EVERY SINGLE MEDICINE ROW present on this invoice page without omitting anything.`;
 
     const prompt = `
       You are an expert pharmaceutical accountant and OCR vision scanner specializing in Iraqi pharmacy supplier invoices (فواتير مذخر الأدوية العراقية: المشارق، المتحدون، بانادول، وغيرها).
-      You are analyzing Page ${pageNumber} of ${totalPages} of a wholesale pharmaceutical invoice.
+      ${pageCountText}
       
       STRICT MANDATE FOR 100% COMPLETE ITEM EXTRACTION:
-      - Extract EVERY SINGLE MEDICINE ROW present on this page without skipping, omitting, or summarizing ANY item.
-      - If this page has 20, 30, 40, or 50 items, ALL of them must be returned in the "items" array.
+      - Extract EVERY SINGLE MEDICINE ROW present across all attached images into the "items" array without skipping, omitting, or summarizing ANY item.
+      - If there are 10, 30, 50, or 100+ items across the pages, ALL of them must be returned in the "items" array.
       - Do NOT stop early or truncate the list.
 
       CRITICAL IRAQI WHOLESALE INVOICE CONVENTIONS:
@@ -726,20 +677,19 @@ export class OcrAiService {
         ]
       }
 
-      Important: Return ONLY valid JSON format. Do NOT wrap in markdown or explanations.
+      Important: Return ONLY valid JSON format. All string values MUST be properly escaped with standard JSON escaping. Do NOT wrap in markdown or explanations.
     `;
 
-    // Use verified active Google Gemini Vision models supported by the current API key
-    const models = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview'];
+    // Verified active Google Gemini Vision model
+    const models = ['gemini-2.5-flash'];
     let lastError: Error | null = null;
-    let quotaExceeded = false;
 
     for (const model of models) {
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           if (attempt > 1) {
-            // Wait 1.5s on retry to allow temporary spike to subside
-            await new Promise((r) => setTimeout(r, 1500));
+            this.logger.warn(`Retrying model ${model} (attempt ${attempt}/2) after 2000ms...`);
+            await new Promise((r) => setTimeout(r, 2000));
           }
 
           const response = await fetch(
@@ -752,19 +702,17 @@ export class OcrAiService {
                   {
                     parts: [
                       { text: prompt },
-                      {
-                        inlineData: {
-                          mimeType: 'image/jpeg',
-                          data: cleanBase64,
-                        },
-                      },
+                      ...imageParts,
                     ],
                   },
                 ],
                 generationConfig: {
                   responseMimeType: 'application/json',
                   temperature: 0.1,
-                  maxOutputTokens: 8192,
+                  maxOutputTokens: 32768,
+                  thinkingConfig: {
+                    thinkingBudget: 0,
+                  },
                 },
               }),
             },
@@ -774,32 +722,63 @@ export class OcrAiService {
             const errData = await response.json().catch(() => null);
             const errMsg = errData?.error?.message || response.statusText;
 
-            // Handle temporary high demand / burst / 503: retry this model once after delay
+            // 1. Fail FAST if daily free tier quota is exhausted (limit: 20 or free_tier_requests)
             if (
-              response.status === 503 ||
-              errMsg?.toLowerCase().includes('high demand') ||
-              errMsg?.toLowerCase().includes('temporar') ||
-              errMsg?.toLowerCase().includes('overloaded')
+              errMsg?.includes('free_tier_requests') ||
+              errMsg?.includes('limit: 20') ||
+              (errMsg?.toLowerCase().includes('quota') && !errMsg?.toLowerCase().includes('per minute'))
             ) {
-              lastError = new Error(`[${model}] ${errMsg}`);
-              this.logger.warn(`Model ${model} high demand spike (attempt ${attempt}/2). Retrying...`);
-              if (attempt < 2) continue;
+              throw new BadRequestException(
+                '⚠️ انتهت الحصة المجانية المؤقتة لـ Google (20 طلباً يومياً) لهذا المفتاح. يمكنك إنشاء مفتاح API مجاني جديد بدقيقة واحدة من https://aistudio.google.com ببريد إلكتروني آخر ووضعه في إعدادات الصيدلية للمتابعة فوراً بدون أي تأخير.',
+              );
             }
 
-            if (errMsg?.toLowerCase().includes('quota') && !errMsg?.toLowerCase().includes('per minute')) {
-              quotaExceeded = true;
+            // 2. Short burst rate limit (wait once only if <= 25s, otherwise fail fast)
+            const retryMatch = errMsg.match(/retry in\s*([\d\.]+)\s*s/i);
+            const retrySec = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) : 0;
+            if (retrySec > 0 && retrySec <= 25 && attempt < 2) {
+              this.logger.warn(`Temporary rate limit spike: waiting ${retrySec + 1}s before retry...`);
+              await new Promise((r) => setTimeout(r, (retrySec + 1) * 1000));
+              continue;
             }
+
+            // 3. Temporary 503 high demand
+            if (response.status === 503 || errMsg?.toLowerCase().includes('high demand') || errMsg?.toLowerCase().includes('overloaded')) {
+              lastError = new Error(`[${model}] ${errMsg}`);
+              if (attempt < 2) {
+                await new Promise((r) => setTimeout(r, 2000));
+                continue;
+              }
+            }
+
             throw new Error(`[${model}] ${errMsg}`);
           }
 
           const data = await response.json();
-          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (!text) throw new Error('Empty AI response from model');
+          const candidate = data?.candidates?.[0];
+          if (!candidate) throw new Error('No candidate returned by Gemini API');
 
-          const cleanJsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
-          return JSON.parse(cleanJsonStr);
+          if (candidate.finishReason === 'MAX_TOKENS') {
+            this.logger.warn(`Gemini hit MAX_TOKENS limit; will attempt robust partial JSON recovery.`);
+          }
+
+          // Concatenate all text parts excluding thinking blocks
+          const parts = candidate?.content?.parts || [];
+          const text = parts
+            .filter((p: any) => !p.thought && typeof p.text === 'string')
+            .map((p: any) => p.text)
+            .join('');
+
+          if (!text || text.trim().length === 0) {
+            throw new Error('Empty AI response from model');
+          }
+
+          return this.parseRobustJson(text, 1);
         } catch (err: any) {
           lastError = err;
+          if (err instanceof BadRequestException) {
+            throw err;
+          }
           if (attempt === 2) {
             this.logger.warn(`Model ${model} failed after retries: ${err.message}`);
           }
@@ -807,15 +786,99 @@ export class OcrAiService {
       }
     }
 
-    if (quotaExceeded) {
-      throw new Error(
-        '⚠️ انتهت حصة استخدام الذكاء الاصطناعي المجانية لهذا الشهر. يرجى:\n' +
-        '1. الانتظار حتى تجديد الحصة\n' +
-        '2. أو الترقية إلى خطة مدفوعة على https://ai.google.dev\n' +
-        '3. أو إدخال الفاتورة يدوياً'
+    throw lastError || new Error('All Gemini Vision models failed to process image');
+  }
+
+  /**
+   * Resilient JSON Parser with Auto-Repair for truncated or malformed LLM responses
+   */
+  private parseRobustJson(text: string, pageNumber: number): any {
+    let clean = text
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/```$/g, '')
+      .trim();
+
+    // 1. Direct standard parse
+    try {
+      return JSON.parse(clean);
+    } catch (directErr: any) {
+      this.logger.warn(
+        `Direct JSON parse failed on page ${pageNumber}: ${directErr.message}. Attempting automated repair...`,
       );
     }
 
-    throw lastError || new Error('All Gemini Vision models failed to process image');
+    // 2. Clean trailing commas before } or ]
+    let repaired = clean.replace(/,\s*([\]}])/g, '$1');
+    try {
+      return JSON.parse(repaired);
+    } catch {}
+
+    // 3. Fix unescaped control characters inside strings
+    try {
+      const sanitized = repaired.replace(/[\u0000-\u001F]+/g, (match) => {
+        if (match === '\n') return '\\n';
+        if (match === '\r') return '\\r';
+        if (match === '\t') return '\\t';
+        return '';
+      });
+      return JSON.parse(sanitized);
+    } catch {}
+
+    // 4. Handle truncated JSON (e.g. cut off mid-array or mid-object)
+    try {
+      // Find the last complete item object in "items": [ ... ]
+      const lastItemClose = clean.lastIndexOf('}');
+      if (lastItemClose > 0) {
+        let partial = clean.slice(0, lastItemClose + 1);
+        // Balance brackets & braces
+        const openBrackets = (partial.match(/\[/g) || []).length;
+        const closeBrackets = (partial.match(/\]/g) || []).length;
+        if (openBrackets > closeBrackets) {
+          partial += ']';
+        }
+        const openBraces = (partial.match(/\{/g) || []).length;
+        const closeBraces = (partial.match(/\}/g) || []).length;
+        if (openBraces > closeBraces) {
+          partial += '}';
+        }
+
+        const parsed = JSON.parse(partial);
+        if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+          this.logger.log(`Successfully recovered ${parsed.items.length} items from truncated JSON on page ${pageNumber}.`);
+          return parsed;
+        }
+      }
+    } catch (truncErr: any) {
+      this.logger.warn(`Truncation repair failed: ${truncErr.message}`);
+    }
+
+    // 5. Fallback: Regex extraction of individual valid item objects
+    try {
+      const itemPattern = /\{\s*"rawName"[\s\S]*?\}(?=\s*[,\]])/g;
+      const matches = clean.match(itemPattern);
+      if (matches && matches.length > 0) {
+        const items: any[] = [];
+        for (const m of matches) {
+          try {
+            items.push(JSON.parse(m));
+          } catch {}
+        }
+        if (items.length > 0) {
+          this.logger.log(`Regex fallback recovered ${items.length} items on page ${pageNumber}.`);
+          return {
+            items,
+            invoiceNumber: '',
+            supplierName: '',
+            invoiceDate: '',
+            totalAmount: 0,
+          };
+        }
+      }
+    } catch (regexErr: any) {
+      this.logger.error(`Regex item recovery failed: ${regexErr.message}`);
+    }
+
+    throw new Error(`تعذر معالجة استجابة الذكاء الاصطناعي كملف JSON صالح: ${clean.substring(0, 150)}...`);
   }
 }

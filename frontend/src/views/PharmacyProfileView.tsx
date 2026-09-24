@@ -46,6 +46,8 @@ export const PharmacyProfileView: React.FC = () => {
   const [backupLoading, setBackupLoading] = useState(false);
   const [restoreLoading, setRestoreLoading] = useState(false);
   const [backupMessage, setBackupMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [testingKey, setTestingKey] = useState(false);
+  const [keyTestResult, setKeyTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Pharmacy details form
   const [pharmacyForm, setPharmacyForm] = useState({
@@ -228,11 +230,32 @@ export const PharmacyProfileView: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
+  // Test Gemini Key Connectivity
+  const handleTestGeminiKey = async () => {
+    setTestingKey(true);
+    setKeyTestResult(null);
+    try {
+      const res = await apiRequest<{ success: boolean; message: string; maskedKey?: string }>('/pharmacy/profile/test-gemini-key', {
+        method: 'POST',
+        body: JSON.stringify({ apiKey: pharmacyForm.geminiApiKey || undefined }),
+      });
+      setKeyTestResult({ success: true, message: res.message });
+    } catch (err: any) {
+      setKeyTestResult({ success: false, message: err.message || 'فشل الاتصال بمفتاح Gemini' });
+    } finally {
+      setTestingKey(false);
+    }
+  };
+
   // Save Pharmacy Info & Logo
   const handleSavePharmacyInfo = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setMessage(null);
+    setKeyTestResult(null);
+
+    const hadNewKey = Boolean(pharmacyForm.geminiApiKey && pharmacyForm.geminiApiKey !== '__REMOVE__');
+    const isRemovingKey = pharmacyForm.geminiApiKey === '__REMOVE__';
 
     try {
       const payload: any = { ...pharmacyForm };
@@ -246,7 +269,14 @@ export const PharmacyProfileView: React.FC = () => {
         body: JSON.stringify(payload),
       });
 
-      setMessage({ type: 'success', text: res.message || 'تم حفظ بيانات وشعار الصيدلية بنجاح' });
+      let successMsg = res.message || 'تم حفظ بيانات وشعار الصيدلية بنجاح';
+      if (hadNewKey) {
+        successMsg = `تم حفظ بيانات الصيدلية وتحديث مفتاح الذكاء الاصطناعي بنجاح (${res.pharmacy?.geminiApiKeyMasked || ''})`;
+      } else if (isRemovingKey) {
+        successMsg = 'تم حفظ بيانات الصيدلية وإزالة مفتاح الذكاء الاصطناعي بنجاح';
+      }
+
+      setMessage({ type: 'success', text: successMsg });
       setPharmacyForm((prev) => ({ ...prev, geminiApiKey: '' }));
       if (res?.pharmacy) {
         const stored = localStorage.getItem('dawaee_pharmacy');
@@ -851,34 +881,95 @@ export const PharmacyProfileView: React.FC = () => {
                   </a>
                 </div>
 
-                <div className="relative">
-                  <input
-                    type={showApiKey ? 'text' : 'password'}
-                    value={pharmacyForm.geminiApiKey === '__REMOVE__' ? '' : pharmacyForm.geminiApiKey}
-                    onChange={(e) => setPharmacyForm({ ...pharmacyForm, geminiApiKey: e.target.value })}
-                    placeholder={
-                      pharmacyForm.geminiApiKey === '__REMOVE__'
-                        ? 'سيتم حذف المفتاح عند الضغط على "حفظ التعديلات"'
-                        : profileData?.pharmacy?.hasGeminiApiKey
-                        ? `محفوظ بأمان (${profileData?.pharmacy?.geminiApiKeyMasked || '••••••••'}) - اتركه فارغاً للإبقاء عليه`
-                        : 'AIzaSyD...'
-                    }
-                    className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs font-mono font-bold text-amber-200 placeholder-slate-400 focus:border-indigo-500 focus:outline-hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                    className="absolute left-3 top-2.5 text-slate-400 hover:text-white cursor-pointer"
-                    title={showApiKey ? 'إخفاء الرمز' : 'إظهار الرمز'}
-                  >
-                    {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type={showApiKey ? 'text' : 'password'}
+                      value={pharmacyForm.geminiApiKey === '__REMOVE__' ? '' : pharmacyForm.geminiApiKey}
+                      onChange={(e) => {
+                        setPharmacyForm({ ...pharmacyForm, geminiApiKey: e.target.value });
+                        setKeyTestResult(null);
+                      }}
+                      placeholder={
+                        pharmacyForm.geminiApiKey === '__REMOVE__'
+                          ? 'سيتم حذف المفتاح عند الضغط على "حفظ التعديلات"'
+                          : profileData?.pharmacy?.hasGeminiApiKey
+                          ? `محفوظ بأمان (${profileData?.pharmacy?.geminiApiKeyMasked || '••••••••'}) - اتركه فارغاً للإبقاء عليه`
+                          : 'AIzaSyD...'
+                      }
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs font-mono font-bold text-amber-200 placeholder-slate-400 focus:border-indigo-500 focus:outline-hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      className="absolute left-3 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                      title={showApiKey ? 'إخفاء الرمز' : 'إظهار الرمز'}
+                    >
+                      {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+
+                  {/* Test Key Button */}
+                  {(profileData?.pharmacy?.hasGeminiApiKey || pharmacyForm.geminiApiKey) && pharmacyForm.geminiApiKey !== '__REMOVE__' && (
+                    <button
+                      type="button"
+                      onClick={handleTestGeminiKey}
+                      disabled={testingKey}
+                      className="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs shrink-0"
+                      title="فحص صلاحية المفتاح والاتصال بسيرفرات Google Gemini"
+                    >
+                      {testingKey ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>جاري الفحص...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                          <span>فحص المفتاح</span>
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
+
+                {/* Key Status Information */}
                 {profileData?.pharmacy?.hasGeminiApiKey && !pharmacyForm.geminiApiKey && (
-                  <p className="text-[10px] text-emerald-400 font-medium">
-                    🔒 المفتاح مشفر ومخزن بأمان في السيرفر ({profileData?.pharmacy?.geminiApiKeyMasked}). لتغييره، الصق المفتاح الجديد أعلاه.
+                  <div className="flex items-center justify-between p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-[11px]">
+                    <div className="flex items-center gap-2 text-emerald-300 font-bold">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>المفتاح المحفوظ حالياً: <span className="font-mono text-emerald-200 font-black">{profileData?.pharmacy?.geminiApiKeyMasked}</span></span>
+                    </div>
+                    <span className="text-[10px] text-emerald-400/90 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                      جاهز للاستخدام ✅
+                    </span>
+                  </div>
+                )}
+
+                {pharmacyForm.geminiApiKey && pharmacyForm.geminiApiKey !== '__REMOVE__' && (
+                  <p className="text-[11px] text-amber-300 font-medium flex items-center gap-1 bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
+                    <span>💡 قمت بكتابة مفتاح جديد. يمكنك الضغط على <b>"فحص المفتاح"</b> للتأكد منه فوراً، ثم اضغط <b>"حفظ التعديلات"</b> بالأسفل لاعتماده.</span>
                   </p>
                 )}
+
+                {/* Test Result Feedback Alert */}
+                {keyTestResult && (
+                  <div
+                    className={`p-3 rounded-xl text-xs font-bold flex items-start gap-2 ${
+                      keyTestResult.success
+                        ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/40'
+                        : 'bg-rose-500/20 text-rose-200 border border-rose-500/40'
+                    }`}
+                  >
+                    {keyTestResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    )}
+                    <span className="leading-relaxed">{keyTestResult.message}</span>
+                  </div>
+                )}
+
                 {pharmacyForm.geminiApiKey === '__REMOVE__' && (
                   <p className="text-[10px] text-rose-400 font-bold">
                     ⚠️ تم تحديد المفتاح للإزالة. اضغط "حفظ التعديلات" بالأسفل لتأكيد الحذف.

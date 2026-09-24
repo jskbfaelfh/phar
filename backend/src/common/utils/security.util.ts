@@ -77,7 +77,7 @@ export function maskSecretKey(secret?: string | null): string {
   if (!secret || typeof secret !== 'string') return '';
   const trimmed = secret.trim();
   if (trimmed.length <= 4) return '••••••••';
-  const tail = trimmed.slice(-4);
+  const tail = trimmed.length >= 10 ? trimmed.slice(-6) : trimmed.slice(-4);
   return '••••••••••••' + tail;
 }
 

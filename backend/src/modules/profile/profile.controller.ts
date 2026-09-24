@@ -63,4 +63,10 @@ export class ProfileController {
   async deleteCashier(@Param('id') id: string) {
     return this.profileService.deleteCashier(id);
   }
+
+  @Post('test-gemini-key')
+  @Roles('OWNER')
+  async testGeminiKey(@Body() body?: { apiKey?: string }) {
+    return this.profileService.testGeminiKey(body?.apiKey);
+  }
 }
