@@ -196,19 +196,54 @@ export class OcrAiService {
       let existingItem: any = null;
       let shelfLocation = '';
 
-      const purchasePrice = Number(item.purchasePricePack || 0);
-      const quantityPacks = Number(item.quantityPacks || 1);
+      // 1. Quantity & Purchase Price
+      let quantityPacks = Number(item.quantityPacks || 1);
       const bonusQuantity = Number(item.bonusQuantity || 0);
       const discountPercent = Number(item.discountPercent || 0);
+      const purchasePrice = Number(item.purchasePricePack || 0);
+      const isCanceled = Boolean(item.isCanceled || item.canceled || quantityPacks === 0);
+      if (isCanceled) {
+        quantityPacks = 0;
+      }
 
-      // ZERO GUESSWORK: Only use sellingPricePack if printed, do NOT guess price
-      const sellingPrice = Number(item.sellingPricePack || 0);
+      // 2. Handwritten Selling Price Normalization (e.g. 30 -> 30000, 6.5 -> 6500 for IQD)
+      let sellingPrice = Number(item.sellingPricePack || 0);
+      if (sellingPrice > 0 && sellingPrice < 500 && purchasePrice >= 1000) {
+        sellingPrice = Math.round(sellingPrice * 1000);
+      }
 
       const discrepancies: string[] = [];
+      if (isCanceled) {
+        discrepancies.push('🚫 مادة مشطوبة / ملغاة بإشارة (X) في الفاتورة');
+      }
 
+      // 3. Iraqi Handwritten Expiry Date Parser (YY/MM, MM/YY, YYYY/MM)
       let expiryDate = '';
       if (item.expiryDate && item.expiryDate !== 'N/A' && item.expiryDate !== 'null') {
-        expiryDate = String(item.expiryDate).trim();
+        let rawExp = String(item.expiryDate).trim().replace(/[\/\.]/g, '-');
+        const parts = rawExp.split('-');
+        if (parts.length === 2) {
+          let p1 = parseInt(parts[0], 10);
+          let p2 = parseInt(parts[1], 10);
+          if (p1 > 2000 && p2 >= 1 && p2 <= 12) {
+            rawExp = `${p1}-${String(p2).padStart(2, '0')}-01`;
+          } else if (p1 >= 24 && p1 <= 40 && p2 >= 1 && p2 <= 12) {
+            // Format: YY-MM (e.g. 29-9 -> 2029-09-01)
+            rawExp = `20${p1}-${String(p2).padStart(2, '0')}-01`;
+          } else if (p2 >= 24 && p2 <= 40 && p1 >= 1 && p1 <= 12) {
+            // Format: MM-YY (e.g. 7-28 -> 2028-07-01)
+            rawExp = `20${p2}-${String(p1).padStart(2, '0')}-01`;
+          } else if (p2 > 2000 && p1 >= 1 && p1 <= 12) {
+            // Format: MM-YYYY
+            rawExp = `${p2}-${String(p1).padStart(2, '0')}-01`;
+          }
+        } else if (parts.length === 3 && parseInt(parts[0], 10) < 100) {
+          let y = parseInt(parts[0], 10);
+          if (y >= 24 && y <= 40) {
+            rawExp = `20${y}-${parts[1]}-${parts[2]}`;
+          }
+        }
+        expiryDate = rawExp;
         const exp = new Date(expiryDate);
         const now = new Date();
         const sixMonths = new Date();
@@ -524,10 +559,10 @@ export class OcrAiService {
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
     const prompt = `
-      You are an expert pharmaceutical accountant and OCR scanner specializing in Iraqi pharmacy supplier invoices (فواتير مذاخر الأدوية العراقية).
-      Analyze the provided image of a wholesale pharmaceutical invoice and accurately extract structured medicine items in JSON format.
+      You are an expert pharmaceutical accountant and OCR vision scanner specializing in Iraqi pharmacy supplier invoices (فواتير مذخر الأدوية العراقية: المشارق، المتحدون، بانادول، وغيرها).
+      Analyze the provided image of a wholesale pharmaceutical invoice and accurately extract structured medicine items in JSON format according to Iraqi wholesale conventions.
 
-      STRICT DRUG NAME FORMATTING RULE:
+      CRITICAL IRAQI WHOLESALE INVOICE CONVENTIONS:
       1. "tradeName": MUST consist of (Clean Commercial Trade Name + Strength) ONLY.
          Example: "Panadol 500mg", "Augmentin 1g", "Cataflam 50mg", "Amaryl 4mg", "Ventolin 2mg", "Lipitor 20mg", "Pregaline 75mg".
          ABSOLUTELY FORBIDDEN IN "tradeName":
@@ -536,25 +571,43 @@ export class OcrAiService {
          - NEVER include manufacturer names (Sanofi, Merck, Accord, AstraZeneca, SDI, Gula, Pfizer, Hikma, Julphar).
          - NEVER include supplier codes or bonus text.
 
-      ZERO GUESSWORK RULE - EXTRACT ONLY WHAT IS PRINTED:
-      2. If expiryDate is NOT clearly printed on the invoice, return null. DO NOT GUESS OR ESTIMATE A DATE (+2 years).
-      3. If batchNumber is NOT printed, return null. DO NOT INVENT A BATCH NUMBER.
-      4. If barcode is NOT printed, return null.
-      5. If sellingPricePack is NOT printed, return null.
-      6. Only extract what is visibly legible on the invoice image.
+      2. HANDWRITTEN SELLING PRICE (سعر البيع المفرد / السعر الرسمي بخط اليد):
+         - In Iraqi wholesale invoices, selling prices are frequently written in ink/pen by the pharmacist or supplier rep.
+         - Look in columns like "العدد" or "السعر الرسمي" or next to the item name for handwritten numbers (e.g., pen ink).
+         - Examples:
+           * "٣٠" or "30" means 30,000 IQD.
+           * "٦.٥" or "6.5" means 6,500 IQD.
+           * "١٠٥٠٠" or "10500" means 10,500 IQD.
+           * "١٧٥٠" or "1750" means 1,750 IQD.
+         - Convert Arabic numerals (١، ٢، ٣...) to standard numbers.
+         - If handwritten or printed selling price exists, extract into "sellingPricePack" (e.g. 30000, 6500, 10500). If none exists, return null.
 
-      TIERED PAYMENT DISCOUNT EXTRACTION:
-      7. Check notes or footer for early payment terms (e.g. "سداد شهر 6%، شهرين 3%، 3 أشهر بدون خصم"):
-         Extract into "discountTiers" array:
-         [
-           { "monthIndex": 1, "daysLimit": 30, "discountPercent": 6 },
-           { "monthIndex": 2, "daysLimit": 60, "discountPercent": 3 }
-         ]
-         If no payment discount is mentioned, return empty array [].
+      3. HANDWRITTEN & PRINTED EXPIRY DATE (تاريخ الإكسباير):
+         - Look for expiry dates written in pen in the margins (especially the left or right margin) or written over/next to crossed-out printed dates.
+         - Iraqi format is usually YY/MM (e.g., "29/9" = Sep 2029 -> "2029-09-01", "28/7" = Jul 2028 -> "2028-07-01") or MM/YY.
+         - If a printed date is crossed out with pen and a handwritten date is written beside it, ALWAYS prefer the handwritten date.
+         - Return in "YYYY-MM-01" format. If neither printed nor handwritten date exists, return null.
 
-      DIRECT OVERALL INVOICE DISCOUNT:
-      8. Check the invoice totals or footer for any overall direct discount (e.g. "خصم مباشر", "خصم خاص", "خصم نقدي", "تنزيلات", "Direct Discount", "Cash Discount", "Special Discount"):
-         Extract into "directDiscountAmount": number (or 0 if none).
+      4. CANCELED / OUT-OF-STOCK ITEMS (المواد المشطوبة / علامة X):
+         - In Iraqi invoices, items not supplied or out of stock are crossed out with a pen line or marked with an 'X' over the row or quantity.
+         - If an item is crossed out or marked with 'X', set "isCanceled": true and "quantityPacks": 0.
+         - If the item is active and supplied, set "isCanceled": false.
+
+      5. BATCH NUMBER (رقم الوجبة):
+         - Return null for "batchNumber" as per system configuration.
+
+      6. TIERED PAYMENT DISCOUNT EXTRACTION:
+         - Check notes or footer for early payment terms (e.g. "سداد شهر 6%، شهرين 3%، 3 أشهر بدون خصم"):
+           Extract into "discountTiers" array:
+           [
+             { "monthIndex": 1, "daysLimit": 30, "discountPercent": 6 },
+             { "monthIndex": 2, "daysLimit": 60, "discountPercent": 3 }
+           ]
+           If no payment discount is mentioned, return empty array [].
+
+      7. DIRECT OVERALL INVOICE DISCOUNT:
+         - Check the invoice totals or footer for any overall direct discount (e.g. "خصم مباشر", "خصم خاص", "خصم نقدي", "تنزيلات", "Direct Discount", "Cash Discount", "Special Discount"):
+           Extract into "directDiscountAmount": number (or 0 if none).
 
       Required Output JSON Format:
       {
@@ -580,8 +633,9 @@ export class OcrAiService {
             "sellingPricePack": number or null,
             "scientificName": "string",
             "barcode": "string or null",
-            "batchNumber": "string or null",
-            "expiryDate": "YYYY-MM-DD or null"
+            "batchNumber": null,
+            "expiryDate": "YYYY-MM-DD or null",
+            "isCanceled": boolean
           }
         ]
       }
@@ -589,8 +643,8 @@ export class OcrAiService {
       Important: Return ONLY valid JSON format. Do NOT wrap in markdown or explanations.
     `;
 
-    // Use official active Google Gemini Vision models (starting with fast gemini-2.5-flash)
-    const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro', 'gemini-pro-latest'];
+    // Use official active Google Gemini Vision models
+    const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
     let lastError: Error | null = null;
     let quotaExceeded = false;
 
