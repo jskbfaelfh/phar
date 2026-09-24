@@ -643,8 +643,8 @@ export class OcrAiService {
       Important: Return ONLY valid JSON format. Do NOT wrap in markdown or explanations.
     `;
 
-    // Use official active Google Gemini Vision models
-    const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+    // Use verified active Google Gemini Vision models supported by the current API key
+    const models = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
     let lastError: Error | null = null;
     let quotaExceeded = false;
 
