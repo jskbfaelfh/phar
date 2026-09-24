@@ -188,11 +188,17 @@ export class OcrAiService {
       if (images.length === 1) {
         aiParsedData = await this.callGeminiVision(apiKey, images[0], 1, 1);
       } else {
-        this.logger.log(`Processing multi-page invoice: ${images.length} pages in parallel...`);
-        // Process each page individually so the model's full token window and attention is devoted to each page
-        const pageResults = await Promise.all(
-          images.map((img, idx) => this.callGeminiVision(apiKey, img, idx + 1, images.length)),
-        );
+        this.logger.log(`Processing multi-page invoice: ${images.length} pages sequentially with pacing...`);
+        const pageResults: any[] = [];
+        for (let idx = 0; idx < images.length; idx++) {
+          if (idx > 0) {
+            // Smooth pacing between pages to avoid Google concurrency / burst limits
+            await new Promise((r) => setTimeout(r, 700));
+          }
+          this.logger.log(`Scanning invoice page ${idx + 1} of ${images.length}...`);
+          const res = await this.callGeminiVision(apiKey, images[idx], idx + 1, images.length);
+          pageResults.push(res);
+        }
 
         for (let i = 0; i < pageResults.length; i++) {
           const pageData = pageResults[i];
@@ -724,62 +730,80 @@ export class OcrAiService {
     `;
 
     // Use verified active Google Gemini Vision models supported by the current API key
-    const models = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+    const models = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3-flash-preview'];
     let lastError: Error | null = null;
     let quotaExceeded = false;
 
     for (const model of models) {
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [
-                {
-                  parts: [
-                    { text: prompt },
-                    {
-                      inlineData: {
-                        mimeType: 'image/jpeg',
-                        data: cleanBase64,
-                      },
-                    },
-                  ],
-                },
-              ],
-              generationConfig: {
-                responseMimeType: 'application/json',
-                temperature: 0.1,
-                maxOutputTokens: 8192,
-              },
-            }),
-          },
-        );
-
-        if (!response.ok) {
-          const errData = await response.json().catch(() => null);
-          const errMsg = errData?.error?.message || response.statusText;
-          // Detect quota errors — no point trying other models on same key
-          if (response.status === 429 || errMsg?.toLowerCase().includes('quota')) {
-            quotaExceeded = true;
-            lastError = new Error(`[${model}] ${errMsg}`);
-            this.logger.warn(`Quota exceeded for model ${model}, trying next model...`);
-            continue;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          if (attempt > 1) {
+            // Wait 1.5s on retry to allow temporary spike to subside
+            await new Promise((r) => setTimeout(r, 1500));
           }
-          throw new Error(`[${model}] ${errMsg}`);
+
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [
+                  {
+                    parts: [
+                      { text: prompt },
+                      {
+                        inlineData: {
+                          mimeType: 'image/jpeg',
+                          data: cleanBase64,
+                        },
+                      },
+                    ],
+                  },
+                ],
+                generationConfig: {
+                  responseMimeType: 'application/json',
+                  temperature: 0.1,
+                  maxOutputTokens: 8192,
+                },
+              }),
+            },
+          );
+
+          if (!response.ok) {
+            const errData = await response.json().catch(() => null);
+            const errMsg = errData?.error?.message || response.statusText;
+
+            // Handle temporary high demand / burst / 503: retry this model once after delay
+            if (
+              response.status === 503 ||
+              errMsg?.toLowerCase().includes('high demand') ||
+              errMsg?.toLowerCase().includes('temporar') ||
+              errMsg?.toLowerCase().includes('overloaded')
+            ) {
+              lastError = new Error(`[${model}] ${errMsg}`);
+              this.logger.warn(`Model ${model} high demand spike (attempt ${attempt}/2). Retrying...`);
+              if (attempt < 2) continue;
+            }
+
+            if (errMsg?.toLowerCase().includes('quota') && !errMsg?.toLowerCase().includes('per minute')) {
+              quotaExceeded = true;
+            }
+            throw new Error(`[${model}] ${errMsg}`);
+          }
+
+          const data = await response.json();
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!text) throw new Error('Empty AI response from model');
+
+          const cleanJsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
+          return JSON.parse(cleanJsonStr);
+        } catch (err: any) {
+          lastError = err;
+          if (attempt === 2) {
+            this.logger.warn(`Model ${model} failed after retries: ${err.message}`);
+          }
         }
-
-        const data = await response.json();
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) throw new Error('Empty AI response from model');
-
-        const cleanJsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        return JSON.parse(cleanJsonStr);
-      } catch (err: any) {
-        lastError = err;
-        this.logger.warn(`Model ${model} failed, trying next: ${err.message}`);
       }
     }
 
