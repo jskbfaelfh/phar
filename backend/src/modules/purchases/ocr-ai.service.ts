@@ -173,10 +173,61 @@ export class OcrAiService {
       }
     }
 
-    // 2. Call Google Gemini Vision AI directly
-    let aiParsedData: any;
+    // 2. Call Google Gemini Vision AI directly (Per-Page extraction to guarantee 100% item coverage)
+    let aiParsedData: any = {
+      invoiceNumber: '',
+      supplierName: '',
+      invoiceDate: '',
+      totalAmount: 0,
+      directDiscountAmount: 0,
+      discountTiers: [],
+      items: [],
+    };
+
     try {
-      aiParsedData = await this.callGeminiVision(apiKey, images);
+      if (images.length === 1) {
+        aiParsedData = await this.callGeminiVision(apiKey, images[0], 1, 1);
+      } else {
+        this.logger.log(`Processing multi-page invoice: ${images.length} pages in parallel...`);
+        // Process each page individually so the model's full token window and attention is devoted to each page
+        const pageResults = await Promise.all(
+          images.map((img, idx) => this.callGeminiVision(apiKey, img, idx + 1, images.length)),
+        );
+
+        for (let i = 0; i < pageResults.length; i++) {
+          const pageData = pageResults[i];
+          if (!pageData) continue;
+
+          this.logger.log(`Page ${i + 1} extracted ${pageData.items?.length || 0} items.`);
+
+          if (!aiParsedData.invoiceNumber && pageData.invoiceNumber) {
+            aiParsedData.invoiceNumber = pageData.invoiceNumber;
+          }
+          if (
+            (!aiParsedData.supplierName || aiParsedData.supplierName === 'مذخر أدوية') &&
+            pageData.supplierName &&
+            pageData.supplierName !== 'مذخر أدوية'
+          ) {
+            aiParsedData.supplierName = pageData.supplierName;
+          }
+          if (!aiParsedData.invoiceDate && pageData.invoiceDate) {
+            aiParsedData.invoiceDate = pageData.invoiceDate;
+          }
+          if (Number(pageData.totalAmount) > Number(aiParsedData.totalAmount)) {
+            aiParsedData.totalAmount = Number(pageData.totalAmount);
+          }
+          if (Number(pageData.directDiscountAmount) > 0) {
+            aiParsedData.directDiscountAmount = Number(pageData.directDiscountAmount);
+          }
+          if (Array.isArray(pageData.discountTiers) && pageData.discountTiers.length > 0) {
+            aiParsedData.discountTiers.push(...pageData.discountTiers);
+          }
+          if (Array.isArray(pageData.items) && pageData.items.length > 0) {
+            aiParsedData.items.push(...pageData.items);
+          }
+        }
+        this.logger.log(`Multi-page combined total items: ${aiParsedData.items.length}`);
+      }
     } catch (err: any) {
       this.logger.error(`Gemini Vision API error: ${err.message}`);
       throw new BadRequestException(
@@ -572,23 +623,24 @@ export class OcrAiService {
   }
 
   /**
-   * Gemini Multimodal Vision AI Model Extractor (Supports single or multi-page invoice images)
+   * Gemini Multimodal Vision AI Model Extractor for a single invoice page
    */
-  private async callGeminiVision(apiKey: string, imageOrImages: string | string[]): Promise<any> {
-    const rawImages: string[] = Array.isArray(imageOrImages) ? imageOrImages : [imageOrImages];
-    const imageParts = rawImages.map((img) => ({
-      inlineData: {
-        mimeType: 'image/jpeg',
-        data: img.replace(/^data:image\/\w+;base64,/, '').trim(),
-      },
-    }));
+  private async callGeminiVision(
+    apiKey: string,
+    imageBase64: string,
+    pageNumber: number = 1,
+    totalPages: number = 1,
+  ): Promise<any> {
+    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '').trim();
 
     const prompt = `
       You are an expert pharmaceutical accountant and OCR vision scanner specializing in Iraqi pharmacy supplier invoices (فواتير مذخر الأدوية العراقية: المشارق، المتحدون، بانادول، وغيرها).
-      You are provided with ${imageParts.length} consecutive image(s)/page(s) representing a single wholesale pharmaceutical invoice.
-      Analyze ALL provided pages thoroughly in sequential order.
-      Extract and merge ALL medicine items from ALL pages into a single consolidated JSON "items" array without skipping or duplicating any items across pages.
-      The invoice metadata (invoiceNumber, supplierName, invoiceDate, totalAmount) should reflect the overarching invoice details (e.g., from the first page header or the final summary totals).
+      You are analyzing Page ${pageNumber} of ${totalPages} of a wholesale pharmaceutical invoice.
+      
+      STRICT MANDATE FOR 100% COMPLETE ITEM EXTRACTION:
+      - Extract EVERY SINGLE MEDICINE ROW present on this page without skipping, omitting, or summarizing ANY item.
+      - If this page has 20, 30, 40, or 50 items, ALL of them must be returned in the "items" array.
+      - Do NOT stop early or truncate the list.
 
       CRITICAL IRAQI WHOLESALE INVOICE CONVENTIONS:
       1. "tradeName": MUST consist of (Clean Commercial Trade Name + Strength) ONLY.
@@ -688,13 +740,19 @@ export class OcrAiService {
                 {
                   parts: [
                     { text: prompt },
-                    ...imageParts,
+                    {
+                      inlineData: {
+                        mimeType: 'image/jpeg',
+                        data: cleanBase64,
+                      },
+                    },
                   ],
                 },
               ],
               generationConfig: {
                 responseMimeType: 'application/json',
                 temperature: 0.1,
+                maxOutputTokens: 8192,
               },
             }),
           },
