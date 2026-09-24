@@ -67,7 +67,7 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
   const [step, setStep] = useState<'UPLOAD' | 'PROCESSING' | 'REVIEW'>('UPLOAD');
   const [processingStage, setProcessingStage] = useState<string>('قراءة النصوص البصرية (OCR)...');
 
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [rawTextHint, setRawTextHint] = useState<string>('');
 
   // Invoice Data
@@ -97,10 +97,9 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
   const [activeScanRowIdx, setActiveScanRowIdx] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Automatic smart compression on file select
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
+  // Helper to compress an individual file client-side
+  const compressFile = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (event) => {
         const img = new Image();
@@ -125,23 +124,58 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(img, 0, 0, width, height);
 
-          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.85);
-          setSelectedImage(compressedBase64);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
         };
+        img.onerror = reject;
         img.src = event.target?.result as string;
       };
+      reader.onerror = reject;
       reader.readAsDataURL(file);
+    });
+  };
+
+  // Automatic smart compression on file(s) select
+  const handleFilesChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    try {
+      const compressedList = await Promise.all(files.map(compressFile));
+      setSelectedImages((prev) => [...prev, ...compressedList].slice(0, 10)); // max 10 pages
+    } catch {
+      setErrorMsg('حدث خطأ أثناء معالجة الصور، يرجى إعادة المحاولة.');
     }
+    if (e.target) e.target.value = '';
+  };
+
+  const handleRemoveImage = (indexToRemove: number) => {
+    setSelectedImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
   // Start AI Extraction Pipeline
-  const runAiExtraction = async (base64Img?: string) => {
-    const imgToSend = base64Img || selectedImage;
+  const runAiExtraction = async (singleBase64Img?: string) => {
+    let imagesToSend: string[] = [];
+    if (singleBase64Img) {
+      imagesToSend = [singleBase64Img];
+    } else if (selectedImages.length > 0) {
+      imagesToSend = selectedImages;
+    }
+
+    if (imagesToSend.length === 0 && !rawTextHint.trim()) {
+      setErrorMsg('يرجى اختيار صورة واحدة على الأقل لفاتورة المذخر للبدء.');
+      return;
+    }
+
     setStep('PROCESSING');
     setErrorMsg(null);
 
     try {
-      setProcessingStage('📷 جاري مسح واستخراج النصوص البصرية وفحص جدول المواد...');
+      const pagesCount = imagesToSend.length;
+      if (pagesCount > 1) {
+        setProcessingStage(`📷 جاري مسح واستخراج النصوص البصرية لـ (${pagesCount}) صفحات من الفاتورة ودمجها...`);
+      } else {
+        setProcessingStage('📷 جاري مسح واستخراج النصوص البصرية وفحص جدول المواد...');
+      }
       await new Promise((r) => setTimeout(r, 600));
 
       setProcessingStage('🧠 جاري قراءة أسماء المواد، التراكيز، الكميات، والأسعار بدقة...');
@@ -156,7 +190,8 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
       const response = await apiRequest<any>('/purchases/ai-scan-invoice', {
         method: 'POST',
         body: JSON.stringify({
-          imageBase64: imgToSend || 'data:image/jpeg;base64,sample',
+          imagesBase64: imagesToSend.length > 0 ? imagesToSend : undefined,
+          imageBase64: imagesToSend[0] || 'data:image/jpeg;base64,sample',
           rawTextHint: rawTextHint.trim() || undefined,
           skipMatching: skipMatching,
         }),
@@ -581,51 +616,122 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
                 </div>
               </div>
 
-              {/* Upload Dropzone */}
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-3xl p-8 text-center cursor-pointer transition-all ${
-                  selectedImage
-                    ? 'border-emerald-500 bg-emerald-50/50 shadow-inner'
-                    : 'border-slate-300 hover:border-emerald-500 hover:bg-slate-100/70 bg-white shadow-xs'
-                }`}
-              >
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  accept="image/*"
-                  className="hidden"
-                />
+              {/* Upload Dropzone & Multi-Page Gallery */}
+              {selectedImages.length > 0 ? (
+                <div className="space-y-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100 flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span className="font-black text-sm text-slate-800">
+                        صفحات الفاتورة المحددة ({selectedImages.length})
+                      </span>
+                      <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-md">
+                        ✨ سيتم دمج كافة المواد من جميع الصفحات
+                      </span>
+                    </div>
 
-                {selectedImage ? (
-                  <div className="space-y-4">
-                    <img
-                      src={selectedImage}
-                      alt="Invoice Preview"
-                      className="max-h-64 mx-auto rounded-2xl object-contain shadow-lg border border-slate-200"
-                    />
-                    <div className="flex items-center justify-center gap-2 text-emerald-700 font-black text-xs">
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>تم تحميل صورة الفاتورة بنجاح. انقر هنا لتغيير الصورة إن أردت</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>إضافة صفحة أخرى</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedImages([])}
+                        className="px-2.5 py-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                        title="إلغاء جميع الصور"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
-                ) : (
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    {selectedImages.map((imgUrl, idx) => (
+                      <div
+                        key={idx}
+                        className="group relative rounded-2xl overflow-hidden border-2 border-emerald-500/40 bg-slate-100 aspect-3/4 flex flex-col justify-between shadow-xs hover:shadow-md transition-all"
+                      >
+                        <div className="absolute top-2 right-2 z-10 bg-slate-900/80 backdrop-blur-xs text-white text-[11px] font-black px-2 py-0.5 rounded-md shadow-xs">
+                          الصفحة {idx + 1}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveImage(idx);
+                          }}
+                          className="absolute top-2 left-2 z-10 w-6 h-6 bg-rose-600/90 hover:bg-rose-700 text-white rounded-lg flex items-center justify-center shadow-md transition-all cursor-pointer"
+                          title="حذف هذه الصفحة"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                        <img
+                          src={imgUrl}
+                          alt={`Page ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    ))}
+
+                    {selectedImages.length < 10 && (
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        className="rounded-2xl border-2 border-dashed border-slate-300 hover:border-emerald-500 bg-slate-50/70 hover:bg-emerald-50/40 aspect-3/4 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-slate-400 hover:text-emerald-700"
+                      >
+                        <div className="w-10 h-10 rounded-2xl bg-white border border-slate-200 flex items-center justify-center shadow-xs">
+                          <Plus className="w-5 h-5 text-emerald-600" />
+                        </div>
+                        <span className="text-[11px] font-black">إضافة صفحة</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFilesChange}
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                  />
+                </div>
+              ) : (
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed rounded-3xl p-8 text-center cursor-pointer transition-all border-slate-300 hover:border-emerald-500 hover:bg-slate-100/70 bg-white shadow-xs"
+                >
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFilesChange}
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                  />
                   <div className="space-y-3 py-6">
                     <div className="w-20 h-20 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-3xl flex items-center justify-center mx-auto shadow-xs">
                       <Camera className="w-10 h-10" />
                     </div>
                     <div>
                       <div className="font-black text-base text-slate-800">
-                        انقر لرفع صورة الفاتورة أو التقاطها عبر الكاميرا
+                        انقر لرفع صور الفاتورة (صفحة واحدة أو عدة صفحات)
                       </div>
-                      <div className="text-xs text-slate-400 mt-1 font-medium">
-                        يدعم صور الهواتف والماسحات الضوئية (JPG, PNG, WebP)
+                      <div className="text-xs text-slate-500 mt-1 font-medium">
+                        يمكنك تحديد عدة صور دفعة واحدة أو التقاط صفحات متعددة (حتى 10 صفحات)
+                      </div>
+                      <div className="text-[11px] text-emerald-700 font-bold mt-2 inline-flex items-center gap-1.5 bg-emerald-50 px-3 py-1 rounded-xl border border-emerald-200/60 shadow-xs">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                        <span>يدعم دمج صفحات الفواتير الطويلة بالذكاء الاصطناعي تلقائياً</span>
                       </div>
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Optional Text Paste Hint */}
               <div className="space-y-1.5 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">

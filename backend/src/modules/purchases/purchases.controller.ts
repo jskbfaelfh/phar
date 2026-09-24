@@ -102,7 +102,14 @@ export class PurchasesController {
   @Post('ai-scan-invoice')
   async aiScanInvoice(
     @Request() req: any,
-    @Body() body: { imageBase64?: string; storageKey?: string; rawTextHint?: string; skipMatching?: boolean },
+    @Body()
+    body: {
+      imageBase64?: string;
+      imagesBase64?: string[];
+      storageKey?: string;
+      rawTextHint?: string;
+      skipMatching?: boolean;
+    },
   ) {
     const userId = req.user.id || req.user.sub || req.user.username;
     const userName = req.user.name || req.user.username;
@@ -114,12 +121,15 @@ export class PurchasesController {
       userName,
     );
 
-    let base64 = body.imageBase64;
+    const MAX_DECODED_BYTES = 10 * 1024 * 1024; // 10 MB limit per image
     let storageKey = body.storageKey;
+    let imagesToSend: string[] = [];
 
-    const MAX_DECODED_BYTES = 10 * 1024 * 1024; // 10 MB limit
-
-    if (storageKey) {
+    if (body.imagesBase64 && Array.isArray(body.imagesBase64) && body.imagesBase64.length > 0) {
+      imagesToSend = body.imagesBase64.filter((img) => typeof img === 'string' && img.trim().length > 50);
+    } else if (body.imageBase64 && typeof body.imageBase64 === 'string' && body.imageBase64.trim().length > 50) {
+      imagesToSend = [body.imageBase64];
+    } else if (storageKey) {
       const { buffer, mimeType } = await this.invoiceStorageService.getImageBuffer(
         req.user.tenantId,
         storageKey,
@@ -129,55 +139,53 @@ export class PurchasesController {
           `حجم الصورة المخزنة (${(buffer.length / (1024 * 1024)).toFixed(2)} ميغابايت) يتجاوز الحد الأقصى المسموح به (10 ميغابايت).`,
         );
       }
-      base64 = `data:${mimeType};base64,${buffer.toString('base64')}`;
-    } else if (base64) {
-      if (typeof base64 !== 'string' || base64.trim().length < 50) {
-        throw new BadRequestException('صيغة بيانات الصورة Base64 غير صالحة.');
-      }
+      imagesToSend = [`data:${mimeType};base64,${buffer.toString('base64')}`];
+    } else {
+      throw new BadRequestException('يرجى تقديم صورة الفاتورة أو صفحاتها عبر imagesBase64 أو storageKey');
+    }
 
-      const rawBase64 = base64.includes('base64,') ? base64.split('base64,')[1].trim() : base64.trim();
+    if (imagesToSend.length === 0) {
+      throw new BadRequestException('لم يتم تقديم صور صالحة للفاتورة.');
+    }
 
-      // Fast estimation check before buffer allocation
+    // Validate size & buffer for each provided image
+    for (let i = 0; i < imagesToSend.length; i++) {
+      const b64 = imagesToSend[i];
+      const rawBase64 = b64.includes('base64,') ? b64.split('base64,')[1].trim() : b64.trim();
       const estimatedBytes = Math.ceil((rawBase64.length * 3) / 4);
       if (estimatedBytes > MAX_DECODED_BYTES * 1.05) {
         throw new BadRequestException(
-          `حجم الصورة بعد فك الترميز (${(estimatedBytes / (1024 * 1024)).toFixed(2)} ميغابايت) يتجاوز الحد الأقصى المسموح به (10 ميغابايت).`,
+          `حجم الصورة رقم ${i + 1} بعد فك الترميز (${(estimatedBytes / (1024 * 1024)).toFixed(2)} ميغابايت) يتجاوز الحد الأقصى (10 ميغابايت).`,
         );
       }
 
       const buffer = Buffer.from(rawBase64, 'base64');
-      if (buffer.length === 0) {
-        throw new BadRequestException('بيانات الصورة فارغة أو تالفة.');
+      if (buffer.length === 0 || buffer.length > MAX_DECODED_BYTES) {
+        throw new BadRequestException(`بيانات الصورة رقم ${i + 1} غير صالحة أو تتجاوز 10 ميغابايت.`);
       }
-      if (buffer.length > MAX_DECODED_BYTES) {
-        throw new BadRequestException(
-          `حجم الصورة بعد فك الترميز (${(buffer.length / (1024 * 1024)).toFixed(2)} ميغابايت) يتجاوز الحد الأقصى المسموح به (10 ميغابايت).`,
-        );
-      }
-
-      // Validate image signature / magic bytes (JPEG/PNG/WEBP)
       this.invoiceStorageService.validateImageBuffer(buffer);
 
-      // Auto-archive incoming base64 to object storage
-      try {
-        const stored = await this.invoiceStorageService.uploadInvoiceImage(
-          req.user.tenantId,
-          buffer,
-          'scanned_invoice.jpg',
-        );
-        storageKey = stored.storageKey;
-      } catch (err: any) {
-        // Non-blocking if storage is temporarily unreachable
+      // Auto-archive first image to object storage if storageKey not yet set
+      if (i === 0 && !storageKey) {
+        try {
+          const stored = await this.invoiceStorageService.uploadInvoiceImage(
+            req.user.tenantId,
+            buffer,
+            'scanned_invoice.jpg',
+          );
+          storageKey = stored.storageKey;
+        } catch (err: any) {
+          // Non-blocking
+        }
       }
-    } else {
-      throw new BadRequestException('يرجى تقديم صورة الفاتورة عبر storageKey أو imageBase64');
     }
 
     const result = await this.ocrAiService.processInvoiceImage(
       req.user.tenantId,
-      base64!,
+      imagesToSend,
       body.skipMatching === true,
     );
+
     return {
       ...result,
       storageKey: storageKey || null,

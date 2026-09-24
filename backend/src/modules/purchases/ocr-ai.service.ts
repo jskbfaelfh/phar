@@ -122,7 +122,7 @@ export class OcrAiService {
    */
   async processInvoiceImage(
     tenantId: string,
-    imageBase64: string,
+    imageOrImages: string | string[],
     skipMatching = false,
   ): Promise<ScannedInvoiceResult> {
     this.logger.log(`Processing real AI OCR for tenant: ${tenantId} (skipMatching: ${skipMatching})`);
@@ -149,24 +149,34 @@ export class OcrAiService {
       );
     }
 
-    if (!imageBase64 || imageBase64.length < 50) {
+    const images: string[] = (Array.isArray(imageOrImages) ? imageOrImages : [imageOrImages])
+      .filter((img) => typeof img === 'string' && img.trim().length > 50);
+
+    if (images.length === 0) {
       throw new BadRequestException('يرجى التقاط أو رفع صورة واضحة لفاتورة المذخر.');
     }
 
-    // Maximum Decoded Image Size: 10 MB
+    if (images.length > 10) {
+      throw new BadRequestException('الحد الأقصى لعدد صفحات الفاتورة هو 10 صور في المرة الواحدة.');
+    }
+
+    // Maximum Decoded Image Size per page: 10 MB
     const MAX_DECODED_BYTES = 10 * 1024 * 1024;
-    const rawBase64 = imageBase64.includes('base64,') ? imageBase64.split('base64,')[1].trim() : imageBase64.trim();
-    const estimatedBytes = Math.ceil((rawBase64.length * 3) / 4);
-    if (estimatedBytes > MAX_DECODED_BYTES * 1.05) {
-      throw new BadRequestException(
-        `حجم صورة الفاتورة بعد فك الترميز (${(estimatedBytes / (1024 * 1024)).toFixed(2)} ميغابايت) يتجاوز الحد الأقصى المسموح به للذكاء الاصطناعي (10 ميغابايت).`,
-      );
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      const rawBase64 = img.includes('base64,') ? img.split('base64,')[1].trim() : img.trim();
+      const estimatedBytes = Math.ceil((rawBase64.length * 3) / 4);
+      if (estimatedBytes > MAX_DECODED_BYTES * 1.05) {
+        throw new BadRequestException(
+          `حجم الصورة رقم ${i + 1} بعد فك الترميز (${(estimatedBytes / (1024 * 1024)).toFixed(2)} ميغابايت) يتجاوز الحد الأقصى المسموح به (10 ميغابايت).`,
+        );
+      }
     }
 
     // 2. Call Google Gemini Vision AI directly
     let aiParsedData: any;
     try {
-      aiParsedData = await this.callGeminiVision(apiKey, imageBase64);
+      aiParsedData = await this.callGeminiVision(apiKey, images);
     } catch (err: any) {
       this.logger.error(`Gemini Vision API error: ${err.message}`);
       throw new BadRequestException(
@@ -553,14 +563,23 @@ export class OcrAiService {
   }
 
   /**
-   * Gemini Multimodal Vision AI Model Extractor
+   * Gemini Multimodal Vision AI Model Extractor (Supports single or multi-page invoice images)
    */
-  private async callGeminiVision(apiKey: string, imageBase64: string): Promise<any> {
-    const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+  private async callGeminiVision(apiKey: string, imageOrImages: string | string[]): Promise<any> {
+    const rawImages: string[] = Array.isArray(imageOrImages) ? imageOrImages : [imageOrImages];
+    const imageParts = rawImages.map((img) => ({
+      inlineData: {
+        mimeType: 'image/jpeg',
+        data: img.replace(/^data:image\/\w+;base64,/, '').trim(),
+      },
+    }));
 
     const prompt = `
       You are an expert pharmaceutical accountant and OCR vision scanner specializing in Iraqi pharmacy supplier invoices (فواتير مذخر الأدوية العراقية: المشارق، المتحدون، بانادول، وغيرها).
-      Analyze the provided image of a wholesale pharmaceutical invoice and accurately extract structured medicine items in JSON format according to Iraqi wholesale conventions.
+      You are provided with ${imageParts.length} consecutive image(s)/page(s) representing a single wholesale pharmaceutical invoice.
+      Analyze ALL provided pages thoroughly in sequential order.
+      Extract and merge ALL medicine items from ALL pages into a single consolidated JSON "items" array without skipping or duplicating any items across pages.
+      The invoice metadata (invoiceNumber, supplierName, invoiceDate, totalAmount) should reflect the overarching invoice details (e.g., from the first page header or the final summary totals).
 
       CRITICAL IRAQI WHOLESALE INVOICE CONVENTIONS:
       1. "tradeName": MUST consist of (Clean Commercial Trade Name + Strength) ONLY.
@@ -660,12 +679,7 @@ export class OcrAiService {
                 {
                   parts: [
                     { text: prompt },
-                    {
-                      inlineData: {
-                        mimeType: 'image/jpeg',
-                        data: cleanBase64,
-                      },
-                    },
+                    ...imageParts,
                   ],
                 },
               ],
