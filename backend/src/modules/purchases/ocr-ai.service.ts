@@ -433,14 +433,23 @@ export class OcrAiService {
 
     const calculatedTotal = matchedItems.reduce((acc, it) => acc + it.totalCost, 0);
 
-    // Parse Tiered Monthly Payment Discounts
+    // Parse Tiered Monthly Payment Discounts (Deduplicated by monthIndex for multi-page scans)
     let discountTiers: DiscountTier[] = [];
     if (Array.isArray(aiParsedData.discountTiers) && aiParsedData.discountTiers.length > 0) {
-      discountTiers = aiParsedData.discountTiers.map((t: any, idx: number) => ({
-        monthIndex: Number(t.monthIndex) || (idx + 1),
-        daysLimit: Number(t.daysLimit) || ((idx + 1) * 30),
-        discountPercent: Number(t.discountPercent) || 0,
-      }));
+      const seenMonths = new Set<number>();
+      for (let idx = 0; idx < aiParsedData.discountTiers.length; idx++) {
+        const t = aiParsedData.discountTiers[idx];
+        const mIdx = Number(t.monthIndex) || (idx + 1);
+        if (!seenMonths.has(mIdx)) {
+          seenMonths.add(mIdx);
+          discountTiers.push({
+            monthIndex: mIdx,
+            daysLimit: Number(t.daysLimit) || (mIdx * 30),
+            discountPercent: Number(t.discountPercent) || 0,
+          });
+        }
+      }
+      discountTiers.sort((a, b) => a.monthIndex - b.monthIndex);
     } else if (aiParsedData.earlyDiscountPercent && Number(aiParsedData.earlyDiscountPercent) > 0) {
       const days = Number(aiParsedData.earlyDiscountDays) || 30;
       discountTiers = [

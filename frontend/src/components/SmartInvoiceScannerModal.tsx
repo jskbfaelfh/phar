@@ -251,8 +251,23 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
 
         // Handle Tiered Monthly Discounts from AI response
         if (response.discountTiers && Array.isArray(response.discountTiers) && response.discountTiers.length > 0) {
-          setDiscountMonthsCount(response.discountTiers.length);
-          setDiscountTiers(response.discountTiers);
+          const seen = new Set<number>();
+          const uniqueTiers: MonthlyDiscountTier[] = [];
+          for (let i = 0; i < response.discountTiers.length; i++) {
+            const t = response.discountTiers[i];
+            const m = Number(t.monthIndex) || (i + 1);
+            if (!seen.has(m)) {
+              seen.add(m);
+              uniqueTiers.push({
+                monthIndex: m,
+                daysLimit: Number(t.daysLimit) || (m * 30),
+                discountPercent: Number(t.discountPercent) || 0,
+              });
+            }
+          }
+          uniqueTiers.sort((a, b) => a.monthIndex - b.monthIndex);
+          setDiscountMonthsCount(uniqueTiers.length);
+          setDiscountTiers(uniqueTiers);
         } else if (response.earlyDiscountPercent && Number(response.earlyDiscountPercent) > 0) {
           setDiscountMonthsCount(1);
           setDiscountTiers([
@@ -912,13 +927,13 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
                 {discountMonthsCount > 0 ? (
                   <div className="space-y-3">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                      {discountTiers.map((tier) => {
+                      {discountTiers.map((tier, idx) => {
                         const deadline = getTierDeadlineDate(tier.daysLimit);
                         const expectedSaving = getTierDiscountAmount(tier.discountPercent);
 
                         return (
                           <div
-                            key={tier.monthIndex}
+                            key={`tier_${tier.monthIndex}_${idx}`}
                             className="p-4 bg-white border-2 border-amber-300/80 rounded-2xl shadow-xs space-y-2.5 relative overflow-hidden"
                           >
                             <div className="flex items-center justify-between">
@@ -1031,7 +1046,7 @@ export const SmartInvoiceScannerModal: React.FC<SmartInvoiceScannerModalProps> =
 
                           return (
                             <tr
-                              key={item.id || idx}
+                              key={item.id ? `scanned_row_${item.id}_${idx}` : `row_${idx}`}
                               className={`hover:bg-slate-50 transition-colors ${
                                 item.discrepancies.length > 0 ? 'bg-amber-50/20' : ''
                               }`}
