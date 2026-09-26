@@ -214,7 +214,7 @@ function getMinAllowedPrice(item: CartItem): { costPrice: number; minPrice: numb
   const unitsPerPk = Number(item.unitsPerPack) || 1;
   const packCost = Number(item.purchasePricePack || 0);
   const costPrice = isPack ? packCost : (item.purchasePriceUnit || (unitsPerPk > 1 ? packCost / unitsPerPk : packCost));
-  const minPrice = costPrice > 0 ? Math.round(costPrice * 1.2) : 0;
+  const minPrice = 0; // Disabled min price limit so cashier can sell at any price
   return { costPrice: Math.round(costPrice), minPrice };
 }
 
@@ -1814,7 +1814,7 @@ export const PosView: React.FC = () => {
                                     setEditingPriceError(`الحد الأدنى هو ${minPrice.toLocaleString()} د.ع (سعر الشراء × 1.2)`);
                                     return;
                                   }
-                                  if (val <= 0) {
+                                  if (val < 0) {
                                     setEditingPriceError('يرجى إدخال سعر صحيح');
                                     return;
                                   }
@@ -1847,7 +1847,7 @@ export const PosView: React.FC = () => {
                                 setEditingPriceError(`الحد الأدنى هو ${minPrice.toLocaleString()} د.ع (سعر الشراء × 1.2)`);
                                 return;
                               }
-                              if (val <= 0) {
+                              if (val < 0) {
                                 setEditingPriceError('يرجى إدخال سعر صحيح');
                                 return;
                               }
