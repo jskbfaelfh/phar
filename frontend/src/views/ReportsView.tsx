@@ -945,6 +945,7 @@ export const ReportsView: React.FC = () => {
                   filteredCurrentStock.map((i, idx) => [
                     idx + 1,
                     i.tradeName,
+                    i.barcode || '',
                     i.scientificName,
                     i.fullPacksRemaining,
                     i.looseUnitsRemaining,
@@ -954,7 +955,7 @@ export const ReportsView: React.FC = () => {
                     Number(i.totalCostValue).toFixed(0),
                     Number(i.totalRetailValue).toFixed(0),
                   ]),
-                  ['#', 'الدواء', 'الاسم العلمي', 'العلب', 'الأشرطة المتبقية', 'إجمالي القطع', 'شراء', 'بيع', 'كلفة', 'بيع'],
+                  ['#', 'الدواء', 'الباركود', 'الاسم العلمي', 'العلب', 'الأشرطة المتبقية', 'إجمالي القطع', 'شراء', 'بيع', 'كلفة', 'بيع'],
                 )
               }
               className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer"
@@ -972,6 +973,7 @@ export const ReportsView: React.FC = () => {
                   <tr>
                     <th className="p-3 w-10 text-center">#</th>
                     <th className="p-3">الدواء</th>
+                    <th className="p-3 font-mono text-center">الباركود</th>
                     <th className="p-3">الاسم العلمي</th>
                     <th className="p-3 text-center">العلب</th>
                     <th className="p-3 text-center">الأشرطة</th>
@@ -984,7 +986,7 @@ export const ReportsView: React.FC = () => {
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {filteredCurrentStock.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-slate-400 font-bold">
+                      <td colSpan={10} className="p-8 text-center text-slate-400 font-bold">
                         لا توجد مواد مطابقة للبحث
                       </td>
                     </tr>
@@ -996,6 +998,15 @@ export const ReportsView: React.FC = () => {
                           <div className="font-bold text-slate-900">{item.tradeName}</div>
                           {item.customName && (
                             <div className="text-[10px] text-amber-700 font-bold">({item.customName})</div>
+                          )}
+                        </td>
+                        <td className="p-3 text-center font-mono">
+                          {item.barcode ? (
+                            <span className="px-2 py-0.5 bg-slate-100 rounded-md border border-slate-200 text-slate-700 font-bold text-[11px] select-all inline-block">
+                              {item.barcode}
+                            </span>
+                          ) : (
+                            <span className="text-slate-300 font-bold">—</span>
                           )}
                         </td>
                         <td className="p-3 text-slate-500">{item.scientificName}</td>
