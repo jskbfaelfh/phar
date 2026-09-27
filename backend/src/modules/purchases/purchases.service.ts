@@ -664,13 +664,13 @@ export class PurchasesService {
         SELECT 
           pii.id,
           ii.medicine_id as "medicineId",
-          ii.custom_name as "tradeName",
-          '' as "scientificName",
+          COALESCE(ii.custom_name, m.trade_name) as "tradeName",
+          m.scientific_name as "scientificName",
           pii.batch_number as "batchNumber",
           pii.expiry_date as "expiryDate",
           pii.quantity_packs as "quantityPacks",
           pii.bonus_packs as "bonusPacks",
-          pii.amortize_bonus as "amortizeBonus",
+          0 as "amortizeBonus",
           pii.units_per_pack as "unitsPerPack",
           pii.purchase_price_pack as "purchasePricePack",
           pii.discount_percent as "discountPercent",
@@ -681,8 +681,9 @@ export class PurchasesService {
           ii.shelf_location as "shelfLocation"
         FROM "${schema}"."purchase_items" pii
         JOIN "${schema}"."inventory_items" ii ON ii.id = pii.inventory_item_id
+        JOIN "public"."medicines" m ON ii.medicine_id = m.id
         WHERE pii.purchase_id = $1::uuid
-        ORDER BY ii.custom_name ASC;
+        ORDER BY COALESCE(ii.custom_name, m.trade_name) ASC;
       `, id);
     }
 
