@@ -520,35 +520,35 @@ export class PurchasesService {
     const schema = tenant.schemaName;
 
     let query = `
-      SELECT 
-        pi.id,
-        pi.invoice_number as "invoiceNumber",
-        pi.supplier_id as "supplierId",
-        pi.supplier_name as "supplierName",
-        pi.invoice_date as "invoiceDate",
-        COALESCE(p.net_total_amount, pi.total_amount) as "totalAmount",
-        COALESCE(p.paid_amount, pi.paid_amount) as "paidAmount",
-        COALESCE(p.remaining_amount, pi.remaining_amount) as "remainingAmount",
-        pi.notes,
-        pi.items_count as "itemsCount",
-        pi.early_discount_days as "earlyDiscountDays",
-        pi.early_discount_percent as "earlyDiscountPercent",
-        pi.early_discount_deadline as "earlyDiscountDeadline",
-        pi.early_discount_amount as "earlyDiscountAmount",
-        pi.early_discount_applied as "earlyDiscountApplied",
-        pi.early_discount_applied_amount as "earlyDiscountAppliedAmount",
-        pi.created_at as "createdAt"
-      FROM "${schema}"."purchase_invoices" pi
-      LEFT JOIN "${schema}"."purchases" p ON pi.id = p.id
-    `;
+        SELECT 
+          COALESCE(pi.id, p.id) as id,
+          COALESCE(pi.invoice_number, p.invoice_number) as "invoiceNumber",
+          COALESCE(pi.supplier_id, p.supplier_id) as "supplierId",
+          COALESCE(pi.supplier_name, p.supplier_name) as "supplierName",
+          COALESCE(pi.invoice_date, p.created_at) as "invoiceDate",
+          COALESCE(p.net_total_amount, pi.total_amount) as "totalAmount",
+          COALESCE(p.paid_amount, pi.paid_amount) as "paidAmount",
+          COALESCE(p.remaining_amount, pi.remaining_amount) as "remainingAmount",
+          COALESCE(pi.notes, p.notes) as notes,
+          COALESCE(pi.items_count, (SELECT COUNT(*)::int FROM "${schema}"."inventory_batches" WHERE purchase_id = COALESCE(pi.id, p.id))) as "itemsCount",
+          pi.early_discount_days as "earlyDiscountDays",
+          pi.early_discount_percent as "earlyDiscountPercent",
+          pi.early_discount_deadline as "earlyDiscountDeadline",
+          pi.early_discount_amount as "earlyDiscountAmount",
+          pi.early_discount_applied as "earlyDiscountApplied",
+          pi.early_discount_applied_amount as "earlyDiscountAppliedAmount",
+          COALESCE(pi.created_at, p.created_at) as "createdAt"
+        FROM "${schema}"."purchases" p
+        FULL OUTER JOIN "${schema}"."purchase_invoices" pi ON p.id = pi.id
+      `;
 
     const params: any[] = [];
     if (search && search.trim()) {
-      query += ` WHERE pi.invoice_number ILIKE $1 OR pi.supplier_name ILIKE $1`;
+      query += ` WHERE COALESCE(pi.invoice_number, p.invoice_number) ILIKE $1 OR COALESCE(pi.supplier_name, p.supplier_name) ILIKE $1`;
       params.push(`%${search.trim()}%`);
     }
 
-    query += ` ORDER BY pi.created_at DESC LIMIT 100;`;
+    query += ` ORDER BY COALESCE(pi.created_at, p.created_at) DESC LIMIT 100;`;
 
     const invoices = await this.prisma.$queryRawUnsafe<any[]>(query, ...params);
     const now = Date.now();

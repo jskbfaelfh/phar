@@ -147,16 +147,14 @@ export const BulkStockEntryView: React.FC = () => {
     const trimmed = line.trim();
     if (!trimmed) return null;
 
-    // Convert Arabic/Eastern digits (٠-٩) to Standard digits (0-9)
-    const normalizedLine = trimmed.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+    const normalizedLine = trimmed.replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString());
 
-    // Detect separator: Tab, Semicolon, Comma, or multi-space
-    let sep = '\t';
-    if (normalizedLine.includes('\t')) sep = '\t';
-    else if (normalizedLine.includes(';') && !normalizedLine.includes(',')) sep = ';';
-    else if (normalizedLine.includes(',')) sep = ',';
+    let sep = "\t";
+    if (normalizedLine.includes("\t")) sep = "\t";
+    else if (normalizedLine.includes(";") && !normalizedLine.includes(",")) sep = ";";
+    else if (normalizedLine.includes(",")) sep = ",";
 
-    let cells = normalizedLine.split(sep).map((c) => c.trim().replace(/^["']|["']$/g, '').trim());
+    let cells = normalizedLine.split(sep).map((c) => c.trim().replace(/^["']|["']$/g, "").trim());
     if (cells.length < 2) {
       if (normalizedLine.split(/\s{2,}/).length >= 2) {
         cells = normalizedLine.split(/\s{2,}/).map((c) => c.trim());
@@ -165,31 +163,62 @@ export const BulkStockEntryView: React.FC = () => {
       }
     }
 
-    // Check if this row is a header row (e.g. contains words like 'باركود', 'المادة', 'السعر')
-    const joined = cells.join(' ');
-    if (/(الباركود|المادة|اسم المادة|السعر|العدد|الكمية|المجموع|الخصم|تاريخ|Barcode|Trade Name|Price|Qty|EXP)/i.test(joined)) {
+    const joined = cells.join(" ");
+    if (/(الباركود|المادة|اسم المادة|السعر|الرصيد|الكمية|الاكسباير|المبيع|تاريخ|Barcode|Trade Name|Price|Qty|EXP)/i.test(joined)) {
       return null;
     }
 
-    // 1. Identify Barcode: Pure digits of 7 to 16 digits length
-    let barcode = '';
-    let barcodeIdx = -1;
+    let tradeName = "";
+    let nameIdx = -1;
+    let maxLetters = 0;
     for (let i = 0; i < cells.length; i++) {
-      const raw = cells[i].replace(/[\s-]/g, '');
-      if (/^\d{7,16}$/.test(raw)) {
+      const letters = cells[i].replace(/[^a-zA-Z؀-ۿ]/g, "");
+      if (letters.length > maxLetters && !/^(د\.ع|IQD|USD|\$|pack|box|كرتونة|قطعة)$/i.test(cells[i].trim())) {
+        maxLetters = letters.length;
+        tradeName = cells[i].trim();
+        nameIdx = i;
+      }
+    }
+
+    if (!tradeName) {
+      for (let i = 0; i < cells.length; i++) {
+        if (cells[i].length > 0 && isNaN(Number(cells[i].replace(/[\s-]/g, "")))) {
+          tradeName = cells[i].trim();
+          nameIdx = i;
+          break;
+        }
+      }
+    }
+
+    let barcode = "";
+    let barcodeIdx = -1;
+    for (let i = 0; i < nameIdx; i++) {
+      const raw = cells[i].replace(/[\s-]/g, "");
+      if (/^\d+$/.test(raw)) {
+        if (i === 0 && parseInt(raw, 10) === lineIndex + 1) continue;
         barcode = raw;
         barcodeIdx = i;
         break;
       }
     }
+    if (!barcode) {
+      for (let i = 0; i < cells.length; i++) {
+        if (i === nameIdx) continue;
+        const raw = cells[i].replace(/[\s-]/g, "");
+        if (/^\d{7,16}$/.test(raw)) {
+          barcode = raw;
+          barcodeIdx = i;
+          break;
+        }
+      }
+    }
 
-    // 2. Identify Discount %: cell containing '%'
     let discount = 0;
     let discountIdx = -1;
     for (let i = 0; i < cells.length; i++) {
-      if (i === barcodeIdx) continue;
-      if (cells[i].includes('%')) {
-        const d = parseFloat(cells[i].replace(/[^\d.]/g, ''));
+      if (i === barcodeIdx || i === nameIdx) continue;
+      if (cells[i].includes("%")) {
+        const d = parseFloat(cells[i].replace(/[^\d.]/g, ""));
         if (!isNaN(d)) {
           discount = d;
           discountIdx = i;
@@ -198,7 +227,6 @@ export const BulkStockEntryView: React.FC = () => {
       }
     }
 
-    // 3. Strict Expiry Date Extraction (MM/YY, MM/YYYY, MM\YY, MM\YYYY, MM-YY, YYYY-MM, etc.)
     let expiryMonth = 12;
     let expiryYear = currentYear + 2;
     let expiryIdx = -1;
@@ -206,15 +234,13 @@ export const BulkStockEntryView: React.FC = () => {
     let hasExplicitExpiry = false;
 
     for (let i = 0; i < cells.length; i++) {
-      if (i === barcodeIdx || i === discountIdx) continue;
+      if (i === barcodeIdx || i === discountIdx || i === nameIdx) continue;
       const cellText = cells[i].trim();
-
-      // Format A: MM/YY, MM/YYYY, MM\YY, MM\YYYY, MM-YY, MM.YY, etc. (e.g., 7\27, 07/27, 07/2027, 12\40, 4\31)
-      const matchA = cellText.match(/^0?([1-9]|1[0-2])\s*[\/\-\\.]\s*(20\d{2}|\d{2})$/);
+      const matchA = cellText.match(/^0?([1-9]|1[0-2])\s*[\/\-\\\.]\s*(20\d{2}|\d{2})$/);
       if (matchA) {
         const m = parseInt(matchA[1], 10);
         let y = parseInt(matchA[2], 10);
-        if (y < 100) y = 2000 + y; // e.g. 27 -> 2027, 31 -> 2031, 40 -> 2040
+        if (y < 100) y = 2000 + y;
         if (y >= 2024 && y <= 2045) {
           expiryMonth = m;
           expiryYear = y;
@@ -223,9 +249,7 @@ export const BulkStockEntryView: React.FC = () => {
           break;
         }
       }
-
-      // Format B: YYYY/MM, YYYY-MM, YYYY\MM (e.g. 2027/07, 2027-07)
-      const matchB = cellText.match(/^(20\d{2})\s*[\/\-\\.]\s*0?([1-9]|1[0-2])$/);
+      const matchB = cellText.match(/^(20\d{2})\s*[\/\-\\\.]\s*0?([1-9]|1[0-2])$/);
       if (matchB) {
         const y = parseInt(matchB[1], 10);
         const m = parseInt(matchB[2], 10);
@@ -238,13 +262,11 @@ export const BulkStockEntryView: React.FC = () => {
         }
       }
     }
-
-    // Fallback: Two adjacent numeric cells where cell 1 is 1-12 and cell 2 is 2024-2045 or 24-45
     if (!hasExplicitExpiry) {
       for (let i = 0; i < cells.length - 1; i++) {
-        if (i === barcodeIdx || i === discountIdx) continue;
-        const c1 = parseInt(cells[i].replace(/[^\d]/g, ''), 10);
-        const c2 = parseInt(cells[i + 1].replace(/[^\d]/g, ''), 10);
+        if (i === barcodeIdx || i === discountIdx || i === nameIdx) continue;
+        const c1 = parseInt(cells[i].replace(/[^\d]/g, ""), 10);
+        const c2 = parseInt(cells[i + 1].replace(/[^\d]/g, ""), 10);
         if (c1 >= 1 && c1 <= 12) {
           let y = c2;
           if (y < 100 && y >= 24 && y <= 45) y = 2000 + y;
@@ -260,58 +282,27 @@ export const BulkStockEntryView: React.FC = () => {
       }
     }
 
-    // 4. Identify Medicine Name: Cell with the most Arabic/English letters
-    let tradeName = '';
-    let nameIdx = -1;
-    let maxLetters = 0;
-    for (let i = 0; i < cells.length; i++) {
-      if (i === barcodeIdx || i === discountIdx || i === expiryIdx || i === expiryIdx2) continue;
-      const letters = cells[i].replace(/[^a-zA-Z\u0600-\u06FF]/g, '');
-      if (letters.length > maxLetters && !/^(د\.ع|IQD|USD|\$|pack|box|علبة|قطعة)$/i.test(cells[i].trim())) {
-        maxLetters = letters.length;
-        tradeName = cells[i].trim();
-        nameIdx = i;
-      }
-    }
-
-    // Fallback for name if no letters
-    if (!tradeName) {
-      for (let i = 0; i < cells.length; i++) {
-        if (i !== barcodeIdx && i !== discountIdx && i !== expiryIdx && i !== expiryIdx2 && cells[i].length > 0) {
-          tradeName = cells[i].trim();
-          nameIdx = i;
-          break;
-        }
-      }
-    }
-
-    // 5. Collect remaining numeric cells (for qty, price, total)
-    const numericCells: { idx: number; val: number }[] = [];
+    const numericCells = [];
     for (let i = 0; i < cells.length; i++) {
       if (i === barcodeIdx || i === discountIdx || i === nameIdx || i === expiryIdx || i === expiryIdx2) continue;
-      const cleaned = cells[i].replace(/[^\d.]/g, '');
+      const cleaned = cells[i].replace(/[^\d.]/g, "");
       const n = parseFloat(cleaned);
       if (!isNaN(n) && n > 0) {
         numericCells.push({ idx: i, val: n });
       }
     }
 
-    // Exclude row index numbers matching 1, 2, 3... at position 0
     const filteredNumerics = numericCells.filter((c) => !(c.idx === 0 && c.val === lineIndex + 1));
-
-    // In Iraq, wholesale unit prices are >= 250 IQD
     const priceCells = filteredNumerics.filter((c) => c.val >= 250);
     const smallCandidates = filteredNumerics.filter((c) => c.val < 250);
 
     let purchasePrice = 0;
     let explicitSellingPrice = 0;
     let qty = 1;
+    let unitsPerPk = 1;
 
     if (priceCells.length >= 2) {
-      // First price cell is purchase price
       purchasePrice = priceCells[0].val;
-
-      // Check if there is an explicit selling price column (a distinct price > purchasePrice)
       for (let k = 1; k < priceCells.length; k++) {
         if (priceCells[k].val > purchasePrice) {
           explicitSellingPrice = priceCells[k].val;
@@ -324,24 +315,25 @@ export const BulkStockEntryView: React.FC = () => {
       purchasePrice = filteredNumerics[filteredNumerics.length - 1].val;
     }
 
-    // Check quantity from small candidates (< 250)
-    if (smallCandidates.length > 0) {
+    if (smallCandidates.length >= 2) {
+      qty = Math.max(1, Math.round(smallCandidates[0].val));
+      unitsPerPk = Math.max(1, Math.round(smallCandidates[1].val));
+    } else if (smallCandidates.length === 1) {
       qty = Math.max(1, Math.round(smallCandidates[0].val));
     }
 
     if (!tradeName && !barcode) return null;
 
-    // Selling price: Use explicit selling price if imported from Excel, otherwise default to +20% markup
     const sellingPrice = explicitSellingPrice > 0 
-      ? roundTo250(explicitSellingPrice) 
-      : (purchasePrice > 0 ? roundTo250(Math.round(purchasePrice * 1.2)) : 0);
+      ? (explicitSellingPrice) 
+      : (purchasePrice > 0 ? (Math.round(purchasePrice * 1.2)) : 0);
 
     return {
       tempId: `import-${Date.now()}-${lineIndex}-${Math.random().toString(36).substring(2, 6)}`,
-      tradeName: tradeName || 'صنف بدون اسم',
-      scientificName: '',
+      tradeName: tradeName || "صنف بدون اسم",
+      scientificName: "",
       barcode: barcode || undefined,
-      unitsPerPack: 1,
+      unitsPerPack: unitsPerPk,
       quantityPacks: qty,
       bonusPacks: 0,
       amortizeBonus: true,
@@ -2063,3 +2055,4 @@ export const BulkStockEntryView: React.FC = () => {
     </div>
   );
 };
+
