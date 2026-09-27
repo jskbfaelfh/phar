@@ -768,11 +768,30 @@ export class PurchasesService {
     const transactionResult = await this.prisma.$transaction(
       async (tx) => {
         // 1. Fetch existing invoice FOR UPDATE
-        const existingInvoices = await tx.$queryRawUnsafe<any[]>(`
+        let isBulkEntry = false;
+        let existingInvoices = await tx.$queryRawUnsafe<any[]>(`
           SELECT * FROM "${schema}"."purchase_invoices"
           WHERE id = $1::uuid
           FOR UPDATE;
         `, purchaseId);
+
+        if (!existingInvoices || existingInvoices.length === 0) {
+          isBulkEntry = true;
+          existingInvoices = await tx.$queryRawUnsafe<any[]>(`
+            SELECT 
+              id,
+              supplier_id,
+              supplier_name,
+              invoice_number,
+              created_at as invoice_date,
+              paid_amount,
+              notes,
+              created_at
+            FROM "${schema}"."purchases"
+            WHERE id = $1::uuid
+            FOR UPDATE;
+          `, purchaseId);
+        }
 
         if (!existingInvoices || existingInvoices.length === 0) {
           throw new NotFoundException('فاتورة الشراء غير موجودة');
@@ -1186,30 +1205,52 @@ export class PurchasesService {
           purchaseId
         );
 
-        await tx.$executeRawUnsafe(`
-          UPDATE "${schema}"."purchase_invoices"
-          SET "invoice_number" = $1,
-              "supplier_id" = $2::uuid,
-              "supplier_name" = $3,
-              "invoice_date" = $4,
-              "total_amount" = $5,
-              "paid_amount" = $6,
-              "remaining_amount" = $7,
-              "notes" = $8,
-              "items_count" = $9
-          WHERE "id" = $10::uuid;
-        `,
-          invoiceNumber,
-          finalSupplierId,
-          resolvedSupplierName,
-          invoiceDate,
-          totalAmount,
-          paidAmount,
-          remainingAmount,
-          dto.notes !== undefined ? dto.notes : existingInvoice.notes,
-          dto.items.length,
-          purchaseId
-        );
+        if (isBulkEntry) {
+          await tx.$executeRawUnsafe(`
+            INSERT INTO "${schema}"."purchase_invoices" (
+              "id", "invoice_number", "supplier_id", "supplier_name", "invoice_date",
+              "total_amount", "paid_amount", "remaining_amount", "notes", "items_count"
+            ) VALUES (
+              $1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10
+            );
+          `,
+            purchaseId,
+            invoiceNumber,
+            finalSupplierId,
+            resolvedSupplierName,
+            invoiceDate,
+            totalAmount,
+            paidAmount,
+            remainingAmount,
+            dto.notes !== undefined ? dto.notes : existingInvoice.notes,
+            dto.items.length
+          );
+        } else {
+          await tx.$executeRawUnsafe(`
+            UPDATE "${schema}"."purchase_invoices"
+            SET "invoice_number" = $1,
+                "supplier_id" = $2::uuid,
+                "supplier_name" = $3,
+                "invoice_date" = $4,
+                "total_amount" = $5,
+                "paid_amount" = $6,
+                "remaining_amount" = $7,
+                "notes" = $8,
+                "items_count" = $9
+            WHERE "id" = $10::uuid;
+          `,
+            invoiceNumber,
+            finalSupplierId,
+            resolvedSupplierName,
+            invoiceDate,
+            totalAmount,
+            paidAmount,
+            remainingAmount,
+            dto.notes !== undefined ? dto.notes : existingInvoice.notes,
+            dto.items.length,
+            purchaseId
+          );
+        }
 
         // 9. Sync supplier_payments
         const existingPayments = await tx.$queryRawUnsafe<any[]>(`
