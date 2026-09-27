@@ -565,22 +565,43 @@ export class InventoryService {
             }
           }
 
-          // 1.1 If item is a new medicine not in catalog -> create in Master DB
+          // 1.1 If item is a new medicine not in catalog -> check if exists or create in Master DB
           if (!finalMedicineId && item.newMedicineData) {
-            const createdMed = await tx.medicine.create({
-              data: {
-                tradeName: item.newMedicineData.tradeName.trim(),
-                scientificName: item.newMedicineData.scientificName?.trim() || null,
-                dosageForm: item.newMedicineData.dosageForm || null,
-                strength: item.newMedicineData.strength || null,
-                manufacturer: item.newMedicineData.manufacturer || null,
-                barcode: item.newMedicineData.barcode?.trim() || null,
-                defaultUnitsPerPack: item.unitsPerPack || 1,
-                isVerified: false,
-                needsPackagingReview: true,
-              },
-            });
-            finalMedicineId = createdMed.id;
+            const tradeNameTrimmed = item.newMedicineData.tradeName.trim();
+            const barcodeTrimmed = item.newMedicineData.barcode?.trim() || null;
+
+            let existingMed: any[] = [];
+            if (barcodeTrimmed) {
+              existingMed = await tx.$queryRawUnsafe<any[]>(
+                `SELECT id FROM public.medicines WHERE barcode = $1 LIMIT 1;`,
+                barcodeTrimmed
+              );
+            }
+            if (existingMed.length === 0) {
+              existingMed = await tx.$queryRawUnsafe<any[]>(
+                `SELECT id FROM public.medicines WHERE LOWER(trade_name) = LOWER($1) LIMIT 1;`,
+                tradeNameTrimmed
+              );
+            }
+
+            if (existingMed.length > 0) {
+              finalMedicineId = existingMed[0].id;
+            } else {
+              const createdMed = await tx.medicine.create({
+                data: {
+                  tradeName: tradeNameTrimmed,
+                  scientificName: item.newMedicineData.scientificName?.trim() || null,
+                  dosageForm: item.newMedicineData.dosageForm || null,
+                  strength: item.newMedicineData.strength || null,
+                  manufacturer: item.newMedicineData.manufacturer || null,
+                  barcode: barcodeTrimmed,
+                  defaultUnitsPerPack: item.unitsPerPack || 1,
+                  isVerified: false,
+                  needsPackagingReview: true,
+                },
+              });
+              finalMedicineId = createdMed.id;
+            }
           }
 
           if (!finalMedicineId) {
