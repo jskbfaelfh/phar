@@ -840,8 +840,8 @@ export class InventoryService {
         };
       },
       {
-        maxWait: 10000,
-        timeout: 30000,
+        maxWait: 60000,
+        timeout: 180000,
       }
     );
 
