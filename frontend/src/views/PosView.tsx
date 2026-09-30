@@ -1518,7 +1518,6 @@ export const PosView: React.FC = () => {
                 const lastSellingPack = Number(lastBatch?.sellingPricePack || med.sellingPricePack || 0);
                 const lastOfficialPack = Number(lastBatch?.sellingPricePack || med.officialPricePack || lastSellingPack || 0);
                 const lastSellingUnit = roundTo250(Number(lastBatch?.sellingPriceUnit || med.sellingPriceUnit || 0) || calculateStripPrice(lastSellingPack, med.unitsPerPack));
-                const lastOfficialUnit = roundTo250(Number(med.officialPriceUnit || lastSellingUnit));
 
                 return (
                   <div key={med.id} className={`p-3 sm:p-4 rounded-2xl transition-all border-b border-slate-100 last:border-0 ${isOutOfStock ? 'bg-rose-50/40 opacity-80' : isExactBarcode ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-400' : 'hover:bg-slate-50/90'}`}>

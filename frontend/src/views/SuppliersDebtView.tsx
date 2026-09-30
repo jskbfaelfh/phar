@@ -20,6 +20,7 @@ import {
   RotateCw,
   Download,
   Trash2,
+  Printer,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 

@@ -13,7 +13,6 @@ import {
   ShieldAlert,
   MapPin,
   Flame,
-  Trash2,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { SupplierReturnModal } from '../components/SupplierReturnModal';

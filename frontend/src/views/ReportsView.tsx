@@ -352,7 +352,6 @@ export const ReportsView: React.FC = () => {
   );
 
   const paginatedCurrentStock = filteredCurrentStock.slice((reportPage - 1) * REPORT_PAGE_SIZE, reportPage * REPORT_PAGE_SIZE);
-  const paginatedSoldStock = filteredSoldStock.slice((reportPage - 1) * REPORT_PAGE_SIZE, reportPage * REPORT_PAGE_SIZE);
   const paginatedReturns = filteredReturns.slice((reportPage - 1) * REPORT_PAGE_SIZE, reportPage * REPORT_PAGE_SIZE);
 
   const renderPagination = (totalItems: number) => {
