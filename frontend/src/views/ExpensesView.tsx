@@ -14,6 +14,9 @@ import {
   Wrench,
   ShoppingBag,
   Receipt,
+  Pencil,
+  ChevronRight,
+  ChevronLeft,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 
@@ -38,6 +41,13 @@ export const ExpensesView: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
+
+  // Edit State
+  const [editingExpense, setEditingExpense] = useState<any>(null);
 
   // Form State
   const [title, setTitle] = useState('');
@@ -67,10 +77,31 @@ export const ExpensesView: React.FC = () => {
   };
 
   useEffect(() => {
+    setPage(1);
     fetchExpenses();
   }, [selectedCategory, startDate, endDate]);
 
-  const handleCreateExpense = async (e: React.FormEvent) => {
+  const handleEditClick = (exp: any) => {
+    setEditingExpense(exp);
+    setTitle(exp.title);
+    setAmount(exp.amount);
+    setCategory(exp.category);
+    setExpenseDate(exp.expenseDate ? new Date(exp.expenseDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
+    setRecipient(exp.recipient || '');
+    setNotes(exp.notes || '');
+    setShowModal(true);
+  };
+
+  const resetForm = () => {
+    setTitle('');
+    setAmount('');
+    setCategory('OTHER');
+    setRecipient('');
+    setNotes('');
+    setEditingExpense(null);
+  };
+
+  const handleSaveExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !amount || Number(amount) <= 0) {
       alert('يرجى ملء الحقول المطلوبة بمبلغ صحيح');
@@ -89,53 +120,58 @@ export const ExpensesView: React.FC = () => {
 
     if (navigator.onLine) {
       try {
-        const res = await apiRequest<any>('/expenses', {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        });
-
-        setMessage({ type: 'success', text: res.message || 'تم تسجيل المصروف بنجاح' });
+        if (editingExpense) {
+          const res = await apiRequest<any>('/expenses/' + editingExpense.id, {
+            method: 'PATCH',
+            body: JSON.stringify(payload),
+          });
+          setMessage({ type: 'success', text: res.message || 'تم تعديل المصروف بنجاح' });
+        } else {
+          const res = await apiRequest<any>('/expenses', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+          setMessage({ type: 'success', text: res.message || 'تم تسجيل المصروف بنجاح' });
+        }
+        
         setShowModal(false);
-        setTitle('');
-        setAmount('');
-        setCategory('OTHER');
-        setRecipient('');
-        setNotes('');
+        resetForm();
         fetchExpenses();
         return;
       } catch (err: any) {
         if (err?.status && err.status >= 400 && err.status < 500) {
-          setMessage({ type: 'error', text: err.message || 'فشل تسجيل المصروف' });
+          setMessage({ type: 'error', text: err.message || 'فشل حفظ المصروف' });
           setSaving(false);
           return;
         }
       }
     }
 
-    // Offline Fallback Queue
-    try {
-      const { queueOutboxOperation } = await import('../utils/outboxQueue');
-      await queueOutboxOperation('EXPENSE', '/expenses', payload);
-      setMessage({ type: 'success', text: 'تم تسجيل المصروف محلياً وسيتم مزامنته تلقائياً فور توفر الإنترنت! 📡' });
-      setShowModal(false);
-      setTitle('');
-      setAmount('');
-      setCategory('OTHER');
-      setRecipient('');
-      setNotes('');
-      // Optimistically add to UI list
-      setExpenses((prev) => [
-        {
-          id: `local-exp-${Date.now()}`,
-          ...payload,
-          createdAt: new Date().toISOString(),
-          isPendingSync: true,
-        },
-        ...prev,
-      ]);
-    } catch (e: any) {
-      setMessage({ type: 'error', text: e.message || 'فشل حفظ المصروف محلياً' });
-    } finally {
+    // Offline Fallback Queue (only for create)
+    if (!editingExpense) {
+      try {
+        const { queueOutboxOperation } = await import('../utils/outboxQueue');
+        await queueOutboxOperation('EXPENSE', '/expenses', payload);
+        setMessage({ type: 'success', text: 'تم تسجيل المصروف محلياً وسيتم مزامنته تلقائياً فور توفر الإنترنت! 📡' });
+        setShowModal(false);
+        resetForm();
+        // Optimistically add to UI list
+        setExpenses((prev) => [
+          {
+            id: `local-exp-${Date.now()}`,
+            ...payload,
+            createdAt: new Date().toISOString(),
+            isPendingSync: true,
+          },
+          ...prev,
+        ]);
+      } catch (e: any) {
+        setMessage({ type: 'error', text: e.message || 'فشل حفظ المصروف محلياً' });
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      setMessage({ type: 'error', text: 'لا يمكن تعديل المصروف في وضع عدم الاتصال' });
       setSaving(false);
     }
   };
@@ -275,6 +311,24 @@ export const ExpensesView: React.FC = () => {
         {/* Date Filter */}
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
+            <button onClick={() => {
+              const today = new Date().toISOString().slice(0, 10);
+              setStartDate(today); setEndDate(today);
+            }} className="px-2 py-1 text-xs border border-slate-300 rounded-lg hover:bg-slate-100 text-slate-700">اليوم</button>
+            <button onClick={() => {
+              const today = new Date();
+              const day = today.getDay();
+              const diff = today.getDate() - day + (day === 0 ? -6 : 1);
+              const monday = new Date(today.setDate(diff)).toISOString().slice(0, 10);
+              setStartDate(monday); setEndDate(new Date().toISOString().slice(0, 10));
+            }} className="px-2 py-1 text-xs border border-slate-300 rounded-lg hover:bg-slate-100 text-slate-700">هذا الأسبوع</button>
+            <button onClick={() => {
+              const today = new Date();
+              const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+              setStartDate(firstDay); setEndDate(new Date().toISOString().slice(0, 10));
+            }} className="px-2 py-1 text-xs border border-slate-300 rounded-lg hover:bg-slate-100 text-slate-700">هذا الشهر</button>
+          </div>
+          <div className="flex items-center gap-1">
             <span className="text-slate-500 font-bold">من:</span>
             <input
               type="date"
@@ -319,7 +373,7 @@ export const ExpensesView: React.FC = () => {
                 <th className="p-3.5">المستلم</th>
                 <th className="p-3.5">المبلغ</th>
                 <th className="p-3.5">ملاحظات</th>
-                <th className="p-3.5 text-center">حذف</th>
+                <th className="p-3.5 text-center">إجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
@@ -338,7 +392,7 @@ export const ExpensesView: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                expenses.map((exp) => {
+                expenses.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((exp) => {
                   const catInfo = CATEGORY_LABELS[exp.category] || CATEGORY_LABELS['OTHER'];
                   return (
                     <tr key={exp.id} className="hover:bg-slate-50 transition-colors">
@@ -357,13 +411,22 @@ export const ExpensesView: React.FC = () => {
                       </td>
                       <td className="p-3.5 text-slate-500 text-[11px]">{exp.notes || '—'}</td>
                       <td className="p-3.5 text-center">
-                        <button
-                          onClick={() => handleDeleteExpense(exp.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
-                          title="حذف"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => handleEditClick(exp)}
+                            className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer"
+                            title="تعديل"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteExpense(exp.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                            title="حذف"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -374,26 +437,56 @@ export const ExpensesView: React.FC = () => {
         </div>
       </div>
 
-      {/* Add Expense Modal */}
+      {/* Pagination Controls */}
+      {expenses.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+          <span className="text-xs text-slate-500 font-bold">
+            عرض {(page - 1) * PAGE_SIZE + 1} إلى {Math.min(page * PAGE_SIZE, expenses.length)} من {expenses.length} مصروف
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronRight className="w-4 h-4 text-slate-600" />
+            </button>
+            <span className="text-sm font-bold text-slate-700 font-mono min-w-[2rem] text-center">
+              {page}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(Math.ceil(expenses.length / PAGE_SIZE), p + 1))}
+              disabled={page >= Math.ceil(expenses.length / PAGE_SIZE)}
+              className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4 text-slate-600" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Add/Edit Expense Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center font-black">
-                  <Plus className="w-4 h-4" />
+                  {editingExpense ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                 </div>
-                <h3 className="font-black text-base text-slate-900">إضافة مصروف</h3>
+                <h3 className="font-black text-base text-slate-900">
+                  {editingExpense ? 'تعديل مصروف' : 'إضافة مصروف'}
+                </h3>
               </div>
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => { setShowModal(false); resetForm(); }}
                 className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateExpense} className="space-y-3.5 text-xs">
+            <form onSubmit={handleSaveExpense} className="space-y-3.5 text-xs">
               <div>
                 <label className="block font-bold text-slate-700 mb-1">البيان *</label>
                 <input
@@ -408,12 +501,12 @@ export const ExpensesView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">المبلغ *</label>
+                  <label className="block font-bold text-slate-700 mb-1">المبلغ * <span className="text-slate-400 font-normal text-[10px]">(مضاعفات 250 دينار)</span></label>
                   <input
                     type="number"
                     required
-                    min="1"
-                    step="any"
+                    min="250"
+                    step="250"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value !== '' ? Number(e.target.value) : '')}
                     placeholder="50000"
@@ -474,7 +567,7 @@ export const ExpensesView: React.FC = () => {
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
+                  onClick={() => { setShowModal(false); resetForm(); }}
                   className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold cursor-pointer"
                 >
                   إلغاء

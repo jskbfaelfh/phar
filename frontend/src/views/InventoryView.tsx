@@ -43,6 +43,187 @@ import {
 
 type TabType = 'INVENTORY' | 'BATCH_TRACE';
 
+// =====================================================
+// مكوّن تعديل وجبة واحدة — قابل للتحرير inline
+// =====================================================
+const EditableBatchRow: React.FC<{
+  batch: any;
+  bIdx: number;
+  editingItem: any;
+  onSaved: (updated: any) => void;
+}> = ({ batch, bIdx, editingItem, onSaved }) => {
+  const unitsPerPk = Number(batch.unitsPerPack || editingItem?.unitsPerPack || 1);
+  const [form, setForm] = React.useState({
+    batchNumber: batch.batchNumber || '',
+    quantityUnitsRemaining: Number(batch.quantityUnitsRemaining ?? 0),
+    purchasePricePack: Number(batch.purchasePricePack ?? 0),
+    sellingPricePack: Number(batch.sellingPricePack ?? 0),
+    sellingPriceUnit: Number(batch.sellingPriceUnit ?? 0),
+    expiryDate: batch.expiryFormatted || '',
+    unitsPerPack: unitsPerPk,
+  });
+  const [saving, setSaving] = React.useState(false);
+  const [saved, setSaved] = React.useState(false);
+
+  const isExpired = batch.isExpired;
+  const isEmpty = Number(batch.quantityUnitsRemaining ?? 0) <= 0;
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await apiRequest(`/inventory/batches/${batch.id}/update`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          batchNumber: form.batchNumber || null,
+          quantityUnitsRemaining: Number(form.quantityUnitsRemaining),
+          purchasePricePack: Number(form.purchasePricePack),
+          sellingPricePack: Number(form.sellingPricePack),
+          sellingPriceUnit: Number(form.sellingPriceUnit),
+          expiryDate: form.expiryDate || null,
+          unitsPerPack: Number(form.unitsPerPack),
+        }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      onSaved({ ...batch, ...form, id: batch.id });
+    } catch (err: any) {
+      alert(err.message || 'فشل حفظ الوجبة');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const inputCls = "w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs font-mono focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 bg-white";
+
+  return (
+    <div className={`rounded-2xl border-2 p-4 transition-colors ${saved ? 'border-emerald-400 bg-emerald-50/30' : isEmpty ? 'border-slate-200 bg-slate-50' : isExpired ? 'border-rose-300 bg-rose-50/40' : 'border-slate-200 bg-white hover:border-indigo-200'}`}>
+      {/* Header row: وجبة # N + شارات المورد والفاتورة */}
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-black text-slate-500">وجبة #{bIdx + 1}</span>
+          {isExpired && <span className="text-[10px] px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full font-bold">⚠️ منتهية الصلاحية</span>}
+          {isEmpty && <span className="text-[10px] px-2 py-0.5 bg-slate-200 text-slate-600 rounded-full font-bold">نافدة</span>}
+          {batch.isBonus && <span className="text-[10px] px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-bold">🎁 بونص</span>}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* اسم المذخر */}
+          {batch.supplierName && (
+            <span className="text-[11px] px-2.5 py-1 bg-blue-50 text-blue-800 rounded-lg border border-blue-200 font-bold flex items-center gap-1">
+              🏪 {batch.supplierName}
+            </span>
+          )}
+          {/* رقم القائمة */}
+          {batch.invoiceNumber && (
+            <span className="text-[11px] px-2.5 py-1 bg-emerald-50 text-emerald-800 rounded-lg border border-emerald-200 font-bold">
+              📋 قائمة #{batch.invoiceNumber}
+            </span>
+          )}
+          {!batch.supplierName && !batch.invoiceNumber && (
+            <span className="text-[10px] text-slate-400 italic">بدون مورد مسجل</span>
+          )}
+        </div>
+      </div>
+
+      {/* حقول التعديل: شبكة */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        {/* رقم الوجبة */}
+        <div>
+          <label className="block text-[10px] font-bold text-slate-500 mb-1">رقم الوجبة (Batch)</label>
+          <input type="text" value={form.batchNumber}
+            onChange={e => setForm(p => ({ ...p, batchNumber: e.target.value }))}
+            className={inputCls} placeholder="مثال: B12345" />
+        </div>
+
+        {/* الكمية المتبقية (وحدات) */}
+        <div>
+          <label className="block text-[10px] font-bold text-slate-500 mb-1">
+            الكمية (وحدات)
+            {form.unitsPerPack > 1 && (
+              <span className="text-slate-400 mr-1">= {Math.floor(Number(form.quantityUnitsRemaining) / form.unitsPerPack)} علبة</span>
+            )}
+          </label>
+          <input type="number" min={0}
+            value={form.quantityUnitsRemaining}
+            onChange={e => setForm(p => ({ ...p, quantityUnitsRemaining: Number(e.target.value) }))}
+            className={`${inputCls} font-black text-slate-900`} />
+        </div>
+
+        {/* شريط / علبة */}
+        <div>
+          <label className="block text-[10px] font-bold text-slate-500 mb-1">شريط / علبة</label>
+          <input type="number" min={1}
+            value={form.unitsPerPack}
+            onChange={e => setForm(p => ({ ...p, unitsPerPack: Number(e.target.value) }))}
+            className={inputCls} />
+        </div>
+
+        {/* الصلاحية */}
+        <div>
+          <label className="block text-[10px] font-bold text-slate-500 mb-1">الصلاحية (YYYY/MM)</label>
+          <input type="text" value={form.expiryDate}
+            onChange={e => setForm(p => ({ ...p, expiryDate: e.target.value }))}
+            placeholder="2027/06"
+            className={`${inputCls} ${isExpired ? 'border-rose-400 text-rose-700' : ''}`} />
+        </div>
+
+        {/* سعر الشراء */}
+        <div>
+          <label className="block text-[10px] font-bold text-amber-700 mb-1">سعر الشراء (علبة)</label>
+          <input type="number" min={0} step={250}
+            value={form.purchasePricePack}
+            onChange={e => setForm(p => ({ ...p, purchasePricePack: Number(e.target.value) }))}
+            className={`${inputCls} text-amber-900 border-amber-200`} />
+        </div>
+
+        {/* سعر البيع علبة */}
+        <div>
+          <label className="block text-[10px] font-bold text-indigo-700 mb-1">بيع الفعلي (علبة)</label>
+          <input type="number" min={0} step={250}
+            value={form.sellingPricePack}
+            onChange={e => {
+              const val = Number(e.target.value);
+              setForm(p => ({
+                ...p,
+                sellingPricePack: val,
+                sellingPriceUnit: p.unitsPerPack > 1 ? Math.round(val / p.unitsPerPack) : val,
+              }));
+            }}
+            className={`${inputCls} text-indigo-900 border-indigo-200`} />
+        </div>
+
+        {/* سعر البيع شريط */}
+        {form.unitsPerPack > 1 && (
+          <div>
+            <label className="block text-[10px] font-bold text-indigo-600 mb-1">بيع الفعلي (شريط)</label>
+            <input type="number" min={0} step={250}
+              value={form.sellingPriceUnit}
+              onChange={e => setForm(p => ({ ...p, sellingPriceUnit: Number(e.target.value) }))}
+              className={`${inputCls} text-indigo-800 border-indigo-100`} />
+          </div>
+        )}
+      </div>
+
+      {/* زر الحفظ */}
+      <div className="mt-3 flex justify-end">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className={`px-4 py-1.5 rounded-xl text-xs font-black cursor-pointer transition-all ${
+            saved
+              ? 'bg-emerald-500 text-white'
+              : saving
+              ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+              : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm'
+          }`}
+        >
+          {saved ? '✅ تم الحفظ' : saving ? '⏳ جاري الحفظ...' : '💾 حفظ الوجبة'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 interface InventoryViewProps {
   onNavigateToExpiry?: () => void;
 }
@@ -55,6 +236,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'LOW_STOCK' | 'EXPIRING_SOON' | 'NO_BARCODE' | 'BARCODE_1_1000'>('ALL');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 100;
 
   // Exact real-time counts from local DB / backend summary
   const [totalCount, setTotalCount] = useState<number>(0);
@@ -81,6 +264,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
 
   const filteredItems = React.useMemo(() => {
     let result = items.filter((it) => {
+      // Client-side search filtering
+      if (searchTerm && searchTerm.trim() !== '') {
+        const term = searchTerm.toLowerCase();
+        const matchesSearch = (
+          it.tradeName?.toLowerCase().includes(term) ||
+          it.customName?.toLowerCase().includes(term) ||
+          it.barcode?.toLowerCase().includes(term) ||
+          it.scientificName?.toLowerCase().includes(term)
+        );
+        if (!matchesSearch) return false;
+      }
+
       if (activeFilter === 'LOW_STOCK') {
         const units = Number(it.validUnitsRemaining ?? it.totalUnitsRemaining ?? 0);
         const minAlert = Number(it.minAlertUnits || 5);
@@ -109,7 +304,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
     }
 
     return result;
-  }, [items, activeFilter, barcodeSortOrder]);
+  }, [items, activeFilter, barcodeSortOrder, searchTerm]);
 
   // Suppliers filter
   const [suppliers, setSuppliers] = useState<any[]>([]);
@@ -157,6 +352,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
     minAlertUnits: 5,
     shelfLocation: '',
   });
+  const [editBatches, setEditBatches] = useState<any[]>([]);
+  const [loadingEditBatches, setLoadingEditBatches] = useState(false);
 
   // Batches details modal state
   const [batchesItem, setBatchesItem] = useState<any | null>(null);
@@ -278,6 +475,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
   }, []);
 
   useEffect(() => {
+    setPage(1);
+  }, [searchTerm, activeFilter, selectedSupplierId, shelfFilter]);
+
+  useEffect(() => {
     const timer = setTimeout(() => {
       fetchInventory();
     }, 250);
@@ -370,7 +571,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
     }
   };
 
-  const openEditModal = (item: any) => {
+  const openEditModal = async (item: any) => {
     setEditingItem(item);
     let initialBarcode = item.barcode || '';
     if (!initialBarcode) {
@@ -399,6 +600,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
       minAlertUnits: Number(item.minAlertUnits || 5),
       shelfLocation: item.shelfLocation || '',
     });
+
+    // جلب الوجبات مع معلومات المورد والفاتورة
+    setEditBatches([]);
+    setLoadingEditBatches(true);
+    try {
+      const batches = await apiRequest<any[]>(`/inventory/${item.id}/batches`);
+      setEditBatches(Array.isArray(batches) ? batches : []);
+    } catch (err) {
+      console.warn('Could not load batches for edit modal', err);
+      setEditBatches([]);
+    } finally {
+      setLoadingEditBatches(false);
+    }
   };
 
   const handleAutoAssignBarcodes = async () => {
@@ -1011,7 +1225,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                       </td>
                     </tr>
                   ) : (
-                    filteredItems.map((item) => (
+                    filteredItems.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE).map((item) => (
                       <tr key={item.id} className="hover:bg-slate-50/60 transition-colors">
                         {/* Name & Shelf */}
                         <td className="p-4">
@@ -1166,6 +1380,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
                 </tbody>
               </table>
             </div>
+            {filteredItems.length > 0 && (
+              <div className="flex items-center gap-2 my-4 justify-center text-xs font-bold text-slate-700">
+                <button className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 rounded-lg cursor-pointer transition-colors" disabled={page===1} onClick={() => setPage(p => p-1)}>السابق</button>
+                <span className="px-2">{page} / {Math.ceil(filteredItems.length / PAGE_SIZE) || 1}</span>
+                <button className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 rounded-lg cursor-pointer transition-colors" disabled={page*PAGE_SIZE >= filteredItems.length} onClick={() => setPage(p => p+1)}>التالي</button>
+                <span className="text-slate-500">({filteredItems.length} صنف)</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1257,192 +1479,254 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
         />
       )}
 
-      {/* 3. Edit Price & Custom Name Modal */}
+      {/* 3. Edit Price & Custom Name Modal — كبير وشامل */}
       {editingItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden flex flex-col">
-            <div className="p-4 bg-indigo-600 text-white flex items-center justify-between">
-              <h3 className="font-bold text-sm">تعديل سعر وبيانات المادة</h3>
-              <button
-                type="button"
-                onClick={() => setEditingItem(null)}
-                className="p-1 hover:bg-white/20 rounded-lg"
-              >
-                <X className="w-4 h-4" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[95vh] overflow-hidden flex flex-col">
+
+            {/* Header */}
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="font-black text-base sm:text-lg">{editingItem.customName || editingItem.tradeName}</h3>
+                <p className="text-indigo-200 text-xs mt-0.5">
+                  {editingItem.scientificName && <span>{editingItem.scientificName} • </span>}
+                  {editingItem.unitsPerPack > 1 ? `${editingItem.unitsPerPack} شريط/علبة` : 'بدون شرائط'}
+                  {editingItem.totalUnitsRemaining > 0
+                    ? ` • متوفر: ${editingItem.availablePacks || 0} علبة`
+                    : ' • ⛔ نافد'}
+                </p>
+              </div>
+              <button type="button" onClick={() => setEditingItem(null)} className="p-2 hover:bg-white/20 rounded-xl transition-colors">
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleUpdatePrice} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">الاسم التجاري المخصص:</label>
-                <input
-                  type="text"
-                  value={editForm.customName}
-                  onChange={(e) => setEditForm({ ...editForm, customName: e.target.value })}
-                  placeholder={editingItem.tradeName}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs"
-                />
-              </div>
+            {/* Scrollable body */}
+            <div className="overflow-y-auto flex-1">
+              <form onSubmit={handleUpdatePrice} id="edit-inventory-form">
+                <div className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
-                  <span>رمز الباركود (Barcode):</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowCameraScanner(true)}
-                    className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200 cursor-pointer"
-                  >
-                    <Camera className="w-3 h-3 text-indigo-600" />
-                    <span>مسح بالكاميرا 📷</span>
-                  </button>
-                </label>
-                <input
-                  type="text"
-                  value={editForm.barcode}
-                  onChange={(e) => setEditForm({ ...editForm, barcode: e.target.value })}
-                  placeholder="امسح أو اكتب الباركود..."
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900"
-                />
-              </div>
+                  {/* ====== القسم الأيسر: البيانات الأساسية ====== */}
+                  <div className="space-y-4">
+                    <h4 className="text-sm font-black text-slate-700 pb-2 border-b border-slate-200 flex items-center gap-2">
+                      <span>📋</span> البيانات الأساسية
+                    </h4>
 
-              {/* Dual Pricing Section */}
-              <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-200/80 space-y-3">
-                <div className="text-xs font-black text-amber-900 flex items-center gap-1">
-                  <span>🏛️ السعر النقابي / الرسمي (المعد للعرض بالكاشير)</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">السعر الرسمي للعلبة:</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={editForm.officialPricePack || ''}
-                      onChange={(e) => {
-                        const val = Number(e.target.value) || 0;
-                        const units = Number(editingItem?.unitsPerPack) || 1;
-                        setEditForm((prev) => ({
-                          ...prev,
-                          officialPricePack: val,
-                          officialPriceUnit: units > 1 ? calculateStripPrice(val, units) : val,
-                        }));
-                      }}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900"
-                      placeholder="السعر الرسمي للباكيت"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">السعر الرسمي للشريط:</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={editForm.officialPriceUnit || ''}
-                      onChange={(e) => setEditForm((prev) => ({ ...prev, officialPriceUnit: Number(e.target.value) || 0 }))}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900"
-                      placeholder="السعر الرسمي للشريط"
-                    />
-                  </div>
-                </div>
-              </div>
+                    {/* الاسم المخصص */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">الاسم التجاري المخصص:</label>
+                      <input
+                        type="text"
+                        value={editForm.customName}
+                        onChange={(e) => setEditForm({ ...editForm, customName: e.target.value })}
+                        placeholder={editingItem.tradeName}
+                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200"
+                      />
+                    </div>
 
-              <div className="bg-indigo-50/60 p-3 rounded-xl border border-indigo-200/80 space-y-3">
-                <div className="text-xs font-black text-indigo-900 flex items-center gap-1">
-                  <span>💊 سعر البيع الفعلي للصيدلية (الحقيقي)</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">سعر بيع الباكيت الفعلي:</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={editForm.sellingPricePack || ''}
-                      onChange={(e) => {
-                        const val = Number(e.target.value) || 0;
-                        const units = Number(editingItem?.unitsPerPack) || 1;
-                        setEditForm((prev) => ({
-                          ...prev,
-                          sellingPricePack: val,
-                          sellingPriceUnit: units > 1 ? calculateStripPrice(val, units) : val,
-                        }));
-                      }}
-                      className="w-full px-3 py-2 bg-white border border-indigo-300 rounded-xl text-xs font-mono font-black text-indigo-950"
-                      placeholder="سعر بيع الباكيت"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">سعر بيع الشريط الفعلي:</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={editForm.sellingPriceUnit || ''}
-                      onChange={(e) => setEditForm((prev) => ({ ...prev, sellingPriceUnit: Number(e.target.value) || 0 }))}
-                      className="w-full px-3 py-2 bg-white border border-indigo-300 rounded-xl text-xs font-mono font-black text-indigo-950"
-                      placeholder="سعر بيع الشريط"
-                      required
-                    />
-                  </div>
-                </div>
-              </div>
+                    {/* الباركود */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                        <span>الباركود:</span>
+                        <button
+                          type="button"
+                          onClick={() => setShowCameraScanner(true)}
+                          className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200 cursor-pointer"
+                        >
+                          <Camera className="w-3 h-3" />
+                          <span>مسح بالكاميرا</span>
+                        </button>
+                      </label>
+                      <input
+                        type="text"
+                        value={editForm.barcode}
+                        onChange={(e) => setEditForm({ ...editForm, barcode: e.target.value })}
+                        placeholder="امسح أو اكتب الباركود..."
+                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:border-indigo-400"
+                      />
+                    </div>
 
-              {/* Shelf Location */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-black text-slate-800 flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5 text-amber-600" />
-                    موقع الرف والتخزين:
-                  </label>
-                  {editForm.shelfLocation && (
-                    <button
-                      type="button"
-                      onClick={() => setEditForm({ ...editForm, shelfLocation: '' })}
-                      className="text-[10px] text-rose-500 hover:underline cursor-pointer font-bold"
-                    >
-                      مسح
-                    </button>
+                    {/* شريط / علبة (للمعلومات فقط) */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                        <p className="text-[10px] font-bold text-slate-500 mb-1">شريط / علبة</p>
+                        <p className="text-lg font-black text-slate-800">{editingItem.unitsPerPack || 1}</p>
+                        <p className="text-[10px] text-slate-400">شريط في كل علبة</p>
+                      </div>
+                      <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                        <p className="text-[10px] font-bold text-slate-500 mb-1">الرصيد الحالي</p>
+                        <p className={`text-lg font-black ${(editingItem.totalUnitsRemaining || 0) > 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                          {editingItem.availablePacks || 0} علبة
+                        </p>
+                        <p className="text-[10px] text-slate-400">{editingItem.totalUnitsRemaining || 0} وحدة</p>
+                      </div>
+                    </div>
+
+                    {/* موقع الرف */}
+                    <div>
+                      <label className="block text-xs font-black text-slate-700 mb-1 flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5 text-amber-600" />
+                        موقع الرف:
+                      </label>
+                      <input
+                        type="text"
+                        value={editForm.shelfLocation}
+                        onChange={(e) => setEditForm({ ...editForm, shelfLocation: e.target.value })}
+                        placeholder="مثال: A-01 أو ❄️ ثلاجة"
+                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold focus:bg-white focus:border-indigo-400"
+                      />
+                    </div>
+
+                    {/* حد التنبيه */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">حد تنبيه النواقص (أشرطة):</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={editForm.minAlertUnits}
+                        onChange={(e) => setEditForm({ ...editForm, minAlertUnits: Number(e.target.value) })}
+                        className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm font-mono focus:border-indigo-400"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* ====== القسم الأيمن: الأسعار ====== */}
+                  <div className="space-y-4">
+                    <h4 className="text-sm font-black text-slate-700 pb-2 border-b border-slate-200 flex items-center gap-2">
+                      <span>💰</span> الأسعار
+                    </h4>
+
+                    {/* السعر الرسمي */}
+                    <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 space-y-3">
+                      <p className="text-xs font-black text-amber-900">🏛️ السعر النقابي / الرسمي</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">السعر الرسمي للعلبة:</label>
+                          <input
+                            type="number" min={0} step={250}
+                            value={editForm.officialPricePack || ''}
+                            onChange={(e) => {
+                              const val = Number(e.target.value) || 0;
+                              const units = Number(editingItem?.unitsPerPack) || 1;
+                              setEditForm((prev) => ({
+                                ...prev,
+                                officialPricePack: val,
+                                officialPriceUnit: units > 1 ? calculateStripPrice(val, units) : val,
+                              }));
+                            }}
+                            className="w-full px-3 py-2.5 bg-white border border-amber-300 rounded-xl text-sm font-mono font-bold focus:border-amber-500"
+                            placeholder="0"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">السعر الرسمي للشريط:</label>
+                          <input
+                            type="number" min={0} step={250}
+                            value={editForm.officialPriceUnit || ''}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, officialPriceUnit: Number(e.target.value) || 0 }))}
+                            className="w-full px-3 py-2.5 bg-white border border-amber-300 rounded-xl text-sm font-mono font-bold focus:border-amber-500"
+                            placeholder="0"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* سعر البيع الفعلي */}
+                    <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-200 space-y-3">
+                      <p className="text-xs font-black text-indigo-900">💊 سعر البيع الفعلي للصيدلية</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">بيع الفعلي (علبة):</label>
+                          <input
+                            type="number" min={0} step={250}
+                            value={editForm.sellingPricePack || ''}
+                            onChange={(e) => {
+                              const val = Number(e.target.value) || 0;
+                              const units = Number(editingItem?.unitsPerPack) || 1;
+                              setEditForm((prev) => ({
+                                ...prev,
+                                sellingPricePack: val,
+                                sellingPriceUnit: units > 1 ? calculateStripPrice(val, units) : val,
+                              }));
+                            }}
+                            className="w-full px-3 py-2.5 bg-white border border-indigo-300 rounded-xl text-sm font-mono font-black text-indigo-950 focus:border-indigo-500"
+                            placeholder="0"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">بيع الفعلي (شريط):</label>
+                          <input
+                            type="number" min={0} step={250}
+                            value={editForm.sellingPriceUnit || ''}
+                            onChange={(e) => setEditForm((prev) => ({ ...prev, sellingPriceUnit: Number(e.target.value) || 0 }))}
+                            className="w-full px-3 py-2.5 bg-white border border-indigo-300 rounded-xl text-sm font-mono font-black text-indigo-950 focus:border-indigo-500"
+                            placeholder="0"
+                            required
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ====== قسم الوجبات القابلة للتعديل ====== */}
+                <div className="px-4 sm:px-6 pb-4 sm:pb-6">
+                  <h4 className="text-sm font-black text-slate-700 pb-2 mb-3 border-b border-slate-200 flex items-center gap-2">
+                    <span>📦</span> الوجبات وسجل الشراء
+                    {loadingEditBatches && <span className="text-xs text-indigo-500 font-normal animate-pulse">جاري التحميل...</span>}
+                    {!loadingEditBatches && editBatches.length > 0 && (
+                      <span className="text-xs text-slate-400 font-normal">{editBatches.length} وجبة</span>
+                    )}
+                  </h4>
+
+                  {loadingEditBatches ? (
+                    <div className="flex items-center justify-center py-8 text-slate-400 text-sm">
+                      <span className="animate-spin mr-2">⏳</span> جاري تحميل الوجبات...
+                    </div>
+                  ) : editBatches.length === 0 ? (
+                    <div className="text-center py-6 text-slate-400 text-sm bg-slate-50 rounded-2xl">
+                      لا توجد وجبات مسجلة لهذه المادة
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {editBatches.map((batch, bIdx) => (
+                        <EditableBatchRow
+                          key={batch.id}
+                          batch={batch}
+                          bIdx={bIdx}
+                          editingItem={editingItem}
+                          onSaved={(updated) => {
+                            setEditBatches(prev => prev.map(b => b.id === updated.id ? { ...b, ...updated } : b));
+                            setMessage({ type: 'success', text: `تم حفظ الوجبة ${updated.batchNumber || ''} بنجاح` });
+                            setTimeout(() => setMessage(null), 3000);
+                          }}
+                        />
+                      ))}
+                    </div>
                   )}
                 </div>
+              </form>
+            </div>
 
-                <input
-                  type="text"
-                  value={editForm.shelfLocation}
-                  onChange={(e) => setEditForm({ ...editForm, shelfLocation: e.target.value })}
-                  placeholder="مثال: A-01 أو B-03 أو ❄️ ثلاجة أو درج 5"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-indigo-600"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">حد تنبيه النواقص (أشرطة):</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={editForm.minAlertUnits}
-                  onChange={(e) => setEditForm({ ...editForm, minAlertUnits: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-mono"
-                  required
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingItem(null)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
-                >
-                  إلغاء
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold cursor-pointer shadow-xs"
-                >
-                  حفظ التعديلات
-                </button>
-              </div>
-            </form>
+            {/* Footer buttons */}
+            <div className="p-4 sm:p-5 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0 bg-slate-50/60">
+              <button
+                type="button"
+                onClick={() => setEditingItem(null)}
+                className="px-5 py-2.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-xl text-sm font-bold cursor-pointer transition-colors"
+              >
+                إلغاء
+              </button>
+              <button
+                type="submit"
+                form="edit-inventory-form"
+                className="px-7 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-black cursor-pointer shadow-md shadow-indigo-600/25 transition-colors"
+              >
+                ✅ حفظ التعديلات
+              </button>
+            </div>
           </div>
         </div>
       )}

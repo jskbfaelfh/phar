@@ -12,12 +12,14 @@ import {
   Package,
   ShieldAlert,
   MapPin,
+  Flame,
+  Trash2,
 } from 'lucide-react';
 import { apiRequest } from '../api/client';
 import { SupplierReturnModal } from '../components/SupplierReturnModal';
 import { BatchTraceabilityModal } from '../components/BatchTraceabilityModal';
 import { usePharmacyLiveSync } from '../hooks/usePharmacyLiveSync';
-import { getLocalSuppliers } from '../utils/localDatabase';
+import { getLocalSuppliers, getLocalInventory } from '../utils/localDatabase';
 
 interface ExpiryViewProps {
   onNavigateToInventory?: () => void;
@@ -31,6 +33,11 @@ export const ExpiryView: React.FC<ExpiryViewProps> = ({ onNavigateToInventory })
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>('');
   const [selectedTier, setSelectedTier] = useState<string>('ALL');
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 50;
 
   // Suppliers list
   const [suppliers, setSuppliers] = useState<any[]>([]);
@@ -43,6 +50,7 @@ export const ExpiryView: React.FC<ExpiryViewProps> = ({ onNavigateToInventory })
   // Modals state
   const [selectedTraceBatch, setSelectedTraceBatch] = useState<string | null>(null);
   const [returnBatchItem, setReturnBatchItem] = useState<any | null>(null);
+  const [disposeBatchItem, setDisposeBatchItem] = useState<any | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Available years list (e.g. current year - 1 up to +7 years)
@@ -88,17 +96,150 @@ export const ExpiryView: React.FC<ExpiryViewProps> = ({ onNavigateToInventory })
 
       const res = await apiRequest<any>(`/inventory/smart-expiry-summary?${params.toString()}`);
       setData(res);
+      setIsOfflineMode(false);
     } catch (err: any) {
-      console.error('Failed to load expiry summary:', err);
-      setError(err.message || 'حدث خطأ أثناء تحميل بيانات الصلاحية');
+      if (!navigator.onLine || err.message?.includes('Failed to fetch') || err.message?.includes('Network Error')) {
+        try {
+          const localData = await computeOfflineExpiryData();
+          setData(localData);
+          setIsOfflineMode(true);
+        } catch (localErr) {
+          console.error('Failed to load local expiry summary:', localErr);
+          setError('حدث خطأ أثناء تحميل بيانات الصلاحية من القاعدة المحلية');
+        }
+      } else {
+        console.error('Failed to load expiry summary:', err);
+        setError(err.message || 'حدث خطأ أثناء تحميل بيانات الصلاحية');
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const computeOfflineExpiryData = async () => {
+    const local = await getLocalInventory();
+    const allBatches: any[] = [];
+    const todayMs = new Date().getTime();
+    
+    const tiers = {
+      EXPIRED: { count: 0 },
+      DAYS_30: { count: 0 },
+      DAYS_60: { count: 0 },
+      DAYS_90: { count: 0 },
+      DAYS_180: { count: 0 },
+      YEAR_1: { count: 0 },
+      SAFE: { count: 0 },
+    };
+
+    let totalAtRiskCost = 0;
+    let totalAtRiskSelling = 0;
+    let totalBatchesAtRisk = 0;
+
+    for (const item of local.items) {
+      if (selectedSupplierId && item.supplierId !== selectedSupplierId) continue;
+      if (!item.activeBatches) continue;
+      for (const b of item.activeBatches) {
+        if (!b.expiryDate) continue;
+        const expDate = new Date(b.expiryDate);
+        const expMs = expDate.getTime();
+        const daysToExpiry = Math.ceil((expMs - todayMs) / (1000 * 60 * 60 * 24));
+
+        if (selectedYear && expDate.getFullYear().toString() !== selectedYear) continue;
+        if (selectedMonth && (expDate.getMonth() + 1).toString() !== selectedMonth) continue;
+
+        let tier = 'SAFE';
+        if (daysToExpiry < 0) tier = 'EXPIRED';
+        else if (daysToExpiry <= 30) tier = 'DAYS_30';
+        else if (daysToExpiry <= 60) tier = 'DAYS_60';
+        else if (daysToExpiry <= 90) tier = 'DAYS_90';
+        else if (daysToExpiry <= 180) tier = 'DAYS_180';
+        else if (daysToExpiry <= 365) tier = 'YEAR_1';
+
+        if (!scopeAllBatches && daysToExpiry > 180) continue;
+        if (selectedTier && selectedTier !== 'ALL' && tier !== selectedTier) continue;
+        
+        if (searchTerm) {
+          const term = searchTerm.toLowerCase();
+          const match = 
+            (item.tradeName || '').toLowerCase().includes(term) ||
+            (item.scientificName || '').toLowerCase().includes(term) ||
+            (item.barcode || '').toLowerCase().includes(term) ||
+            (b.batchNumber || '').toLowerCase().includes(term) ||
+            (item.supplierName || '').toLowerCase().includes(term);
+          if (!match) continue;
+        }
+
+        tiers[tier as keyof typeof tiers].count++;
+        
+        const isAtRisk = daysToExpiry <= 180;
+        if (isAtRisk) {
+          totalBatchesAtRisk++;
+          totalAtRiskCost += (Number(item.purchasePricePack) || 0) * (Number(b.availablePacks) || 0);
+          totalAtRiskSelling += (Number(item.sellingPricePack) || 0) * (Number(b.availablePacks) || 0);
+        }
+
+        allBatches.push({
+          batchId: b.batchId || b.id || Math.random().toString(),
+          medicineId: item.id,
+          tradeName: item.tradeName,
+          scientificName: item.scientificName,
+          dosageForm: item.dosageForm,
+          strength: item.strength,
+          batchNumber: b.batchNumber,
+          expiryDate: b.expiryDate,
+          expiryFormatted: expDate.toLocaleDateString('ar-IQ'),
+          daysUntilExpiry: daysToExpiry,
+          expiryTier: tier,
+          packsRemaining: b.availablePacks || 0,
+          stripsRemaining: b.availableStrips || 0,
+          remainingUnits: b.quantityUnitsRemaining || 0,
+          totalCostValue: (Number(item.purchasePricePack) || 0) * (Number(b.availablePacks) || 0),
+          purchasePricePack: item.purchasePricePack,
+          supplierName: item.supplierName,
+          supplierId: item.supplierId,
+        });
+      }
+    }
+
+    return {
+      summary: {
+        tiers,
+        totalBatches: allBatches.length,
+        totalBatchesAtRisk,
+        totalAtRiskCost,
+        totalAtRiskSelling
+      },
+      batches: allBatches
+    };
+  };
+
+  const handleDisposeBatch = async () => {
+    if (!disposeBatchItem) return;
+    try {
+      await apiRequest(`/inventory/batches/${disposeBatchItem.batchId}/write-off`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'expired', quantity: disposeBatchItem.remainingUnits })
+      });
+      setActionMessage({ type: 'success', text: 'تم تسجيل إتلاف التشغيلة بنجاح!' });
+      setDisposeBatchItem(null);
+      fetchExpiryData();
+    } catch (err: any) {
+      if (err.message?.includes('404')) {
+        setActionMessage({ type: 'error', text: 'ميزة الإتلاف قيد التطوير' });
+      } else {
+        setActionMessage({ type: 'error', text: err.message || 'فشل في إتلاف التشغيلة' });
+      }
+      setDisposeBatchItem(null);
     }
   };
 
   useEffect(() => {
     fetchSuppliers();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedYear, selectedMonth, selectedSupplierId, scopeAllBatches, selectedTier]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -137,6 +278,9 @@ export const ExpiryView: React.FC<ExpiryViewProps> = ({ onNavigateToInventory })
   const batches = data?.batches || [];
   const summary = data?.summary || {};
   const tiers = summary?.tiers || {};
+
+  const totalPages = Math.ceil(batches.length / PAGE_SIZE);
+  const paginatedBatches = batches.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
     <div className="flex flex-col gap-5 pb-16 print:p-0">
@@ -211,6 +355,14 @@ export const ExpiryView: React.FC<ExpiryViewProps> = ({ onNavigateToInventory })
           >
             <X className="w-3.5 h-3.5" />
           </button>
+        </div>
+      )}
+
+      {/* Offline Mode Banner */}
+      {isOfflineMode && (
+        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-center gap-3 text-amber-800 text-xs font-black animate-in fade-in">
+          <AlertTriangle className="w-5 h-5 text-amber-600" />
+          <span>أنت تعمل في وضع عدم الاتصال (Offline). البيانات معروضة من القاعدة المحلية وقد لا تكون محدثة.</span>
         </div>
       )}
 
@@ -535,7 +687,7 @@ export const ExpiryView: React.FC<ExpiryViewProps> = ({ onNavigateToInventory })
                     <span className="font-bold">{error}</span>
                   </td>
                 </tr>
-              ) : batches.length === 0 ? (
+              ) : paginatedBatches.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-16 text-center text-slate-400">
                     <CheckCircle2 className="w-12 h-12 stroke-1 text-emerald-500 mx-auto mb-3" />
@@ -548,7 +700,7 @@ export const ExpiryView: React.FC<ExpiryViewProps> = ({ onNavigateToInventory })
                   </td>
                 </tr>
               ) : (
-                batches.map((b: any) => {
+                paginatedBatches.map((b: any) => {
                   const isExp = b.expiryTier === 'EXPIRED';
                   const isUnder30 = b.expiryTier === 'DAYS_30';
                   const isUnder60 = b.expiryTier === 'DAYS_60';
@@ -696,7 +848,16 @@ export const ExpiryView: React.FC<ExpiryViewProps> = ({ onNavigateToInventory })
                             title="إرجاع هذه الكمية للمذخر وخصمها من حسابه"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
-                            <span>إرجاع للمذخر</span>
+                            <span>إرجاع</span>
+                          </button>
+
+                          <button
+                            onClick={() => setDisposeBatchItem(b)}
+                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95"
+                            title="إتلاف هذه التشغيلة"
+                          >
+                            <Flame className="w-3.5 h-3.5" />
+                            <span>إتلاف</span>
                           </button>
 
                           <button
@@ -716,6 +877,60 @@ export const ExpiryView: React.FC<ExpiryViewProps> = ({ onNavigateToInventory })
           </table>
         </div>
       </div>
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between bg-white px-6 py-4 rounded-3xl border border-slate-200 shadow-xs print:hidden">
+          <button
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-xl text-xs font-black cursor-pointer transition-all"
+          >
+            السابق
+          </button>
+          <span className="text-xs font-bold text-slate-500">
+            صفحة {currentPage} من {totalPages}
+          </span>
+          <button
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-xl text-xs font-black cursor-pointer transition-all"
+          >
+            التالي
+          </button>
+        </div>
+      )}
+
+      {/* Disposal Confirmation Modal */}
+      {disposeBatchItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-slate-200 animate-in zoom-in-95">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4 text-rose-600">
+                <Flame className="w-6 h-6" />
+                <h2 className="text-lg font-black">إتلاف تشغيلة</h2>
+              </div>
+              <p className="text-sm text-slate-600 font-bold mb-6">
+                هل تريد تسجيل إتلاف هذه التشغيلة؟ ({disposeBatchItem.tradeName} - {disposeBatchItem.batchNumber || 'بدون رقم'})
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleDisposeBatch}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-black text-sm transition-all"
+                >
+                  نعم، تأكيد الإتلاف
+                </button>
+                <button
+                  onClick={() => setDisposeBatchItem(null)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-sm transition-all"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Supplier Return Modal */}
       {returnBatchItem && (

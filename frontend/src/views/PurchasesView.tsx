@@ -69,6 +69,8 @@ export const PurchasesView: React.FC = () => {
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
   const [selectedInvoice, setSelectedInvoice] = useState<PurchaseInvoice | null>(null);
   const [showAiScanModal, setShowAiScanModal] = useState(false);
   const [modalSkipMatching, setModalSkipMatching] = useState(false);
@@ -146,6 +148,7 @@ export const PurchasesView: React.FC = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchInvoices();
+      setPage(1);
     }, 300);
     return () => clearTimeout(timer);
   }, [searchTerm]);
@@ -333,7 +336,7 @@ export const PurchasesView: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs print:hidden">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center font-bold">
             <FileText className="w-5 h-5" />
@@ -373,7 +376,7 @@ export const PurchasesView: React.FC = () => {
 
       {message && (
         <div
-          className={`p-4 rounded-xl flex items-center justify-between text-xs font-bold ${
+          className={`p-4 rounded-xl flex items-center justify-between text-xs font-bold print:hidden ${
             message.type === 'success'
               ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
               : 'bg-rose-50 text-rose-800 border border-rose-200'
@@ -395,7 +398,7 @@ export const PurchasesView: React.FC = () => {
 
       {/* Early Settlement Discount Urgent Alerts */}
       {earlyDiscountAlerts.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl space-y-2">
+        <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl space-y-2 print:hidden">
           <div className="flex items-center gap-2 font-black text-amber-950 text-xs">
             <Sparkles className="w-4 h-4 text-amber-600 animate-bounce" />
             <span>تنبيهات السداد المبكر والتوفير (Early Payment Discounts):</span>
@@ -428,7 +431,7 @@ export const PurchasesView: React.FC = () => {
       )}
 
       {/* Search and Summary Filters */}
-      <div className="flex items-center gap-3 bg-white p-3.5 rounded-2xl border border-slate-200">
+      <div className="flex items-center gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 print:hidden">
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute right-3 top-3 text-slate-400" />
           <input
@@ -445,7 +448,7 @@ export const PurchasesView: React.FC = () => {
       </div>
 
       {/* Invoices List Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden print:hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-right text-xs">
             <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold">
@@ -477,7 +480,7 @@ export const PurchasesView: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                invoices.map((inv) => (
+                invoices.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE).map((inv) => (
                   <tr key={inv.id} className="hover:bg-slate-50 transition-colors">
                     <td className="p-3.5 font-bold font-mono text-blue-700">
                       <div>{inv.invoiceNumber}</div>
@@ -559,18 +562,39 @@ export const PurchasesView: React.FC = () => {
             </tbody>
           </table>
         </div>
+        {invoices.length > 0 && (
+          <div className="flex items-center gap-2 my-4 justify-center text-xs font-bold text-slate-700">
+            <button className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 rounded-lg cursor-pointer transition-colors" disabled={page===1} onClick={() => setPage(p => p-1)}>السابق</button>
+            <span className="px-2">{page} / {Math.ceil(invoices.length / PAGE_SIZE) || 1}</span>
+            <button className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 rounded-lg cursor-pointer transition-colors" disabled={page*PAGE_SIZE >= invoices.length} onClick={() => setPage(p => p+1)}>التالي</button>
+            <span className="text-slate-500">({invoices.length} فاتورة)</span>
+          </div>
+        )}
       </div>
 
       {/* Invoice Details & Edit Modal */}
       {selectedInvoice && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 print:static print:bg-transparent print:p-0 print:block">
           <div
             className={`bg-white rounded-3xl p-6 ${
               isEditing ? 'max-w-6xl' : 'max-w-3xl'
-            } w-full shadow-2xl border border-slate-200 max-h-[92vh] flex flex-col space-y-4 transition-all`}
+            } w-full shadow-2xl border border-slate-200 max-h-[92vh] flex flex-col space-y-4 transition-all print:shadow-none print:border-none print:max-h-none print:p-0 print:block`}
           >
+            {/* Print Only Header */}
+            <div className="hidden print:block mb-6 border-b-2 border-slate-900 pb-4">
+              <div className="flex justify-between items-center mb-2">
+                <h1 className="text-2xl font-black">صيدلية دوائي</h1>
+                <h2 className="text-xl font-bold">فاتورة مشتريات</h2>
+              </div>
+              <div className="flex justify-between text-sm font-bold mt-4">
+                <div>رقم الفاتورة: {selectedInvoice.invoiceNumber}</div>
+                <div>المورد: {selectedInvoice.supplierName || 'غير محدد'}</div>
+                <div>التاريخ: {new Date(selectedInvoice.invoiceDate).toLocaleDateString('ar-IQ')}</div>
+              </div>
+            </div>
+
             {/* Modal Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 shrink-0">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 shrink-0 print:hidden">
               <div className="flex items-center gap-3">
                 <div
                   className={`w-9 h-9 rounded-xl ${
@@ -603,7 +627,7 @@ export const PurchasesView: React.FC = () => {
 
             {/* 24-Hour Eligibility Status Banner */}
             {selectedInvoice.canEdit ? (
-              <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl shrink-0">
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl shrink-0 print:hidden">
                 <div className="flex items-center gap-2 text-xs font-black text-emerald-900">
                   <Clock className="w-4 h-4 text-emerald-600 animate-pulse shrink-0" />
                   <span>ميزة التعديل الشامل مفعلة (أول 24 ساعة من تسجيل الفاتورة):</span>
@@ -622,7 +646,7 @@ export const PurchasesView: React.FC = () => {
                 )}
               </div>
             ) : (
-              <div className="flex items-center gap-2 p-3 bg-slate-100 border border-slate-200 rounded-2xl text-xs font-bold text-slate-600 shrink-0">
+              <div className="flex items-center gap-2 p-3 bg-slate-100 border border-slate-200 rounded-2xl text-xs font-bold text-slate-600 shrink-0 print:hidden">
                 <Lock className="w-4 h-4 text-slate-400 shrink-0" />
                 <span>
                   🔒 انقضت مهلة الـ 24 ساعة المسموحة لتعديل الفاتورة • الفاتورة للقراءة والطباعة فقط حفاظاً على دقة الحسابات والمخزون
@@ -632,7 +656,7 @@ export const PurchasesView: React.FC = () => {
 
             {/* Edit Error Alert if any */}
             {isEditing && editError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-bold flex items-center justify-between shrink-0">
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-bold flex items-center justify-between shrink-0 print:hidden">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
                   <span>{editError}</span>
@@ -722,9 +746,12 @@ export const PurchasesView: React.FC = () => {
                       {Number(selectedInvoice.remainingAmount).toLocaleString()} د.ع
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 print:hidden">
                     <button
-                      onClick={() => window.print()}
+                      onClick={() => {
+                        document.title = 'فاتورة شراء - ' + selectedInvoice.invoiceNumber;
+                        window.print();
+                      }}
                       className="px-3.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-bold inline-flex items-center gap-1.5 cursor-pointer"
                     >
                       <Printer className="w-3.5 h-3.5" />

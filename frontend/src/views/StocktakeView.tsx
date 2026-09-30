@@ -62,6 +62,9 @@ export const StocktakeView: React.FC<StocktakeViewProps> = ({ onNavigateToInvent
   const [showReconcileModal, setShowReconcileModal] = useState(false);
   const [reconcileNotes, setReconcileNotes] = useState('');
 
+  // Local state to prevent network requests on every keystroke
+  const [localCounts, setLocalCounts] = useState<Record<string, { packs?: string, loose?: string }>>({});
+
   // 1. Fetch all sessions
   const fetchSessions = async () => {
     try {
@@ -349,6 +352,7 @@ export const StocktakeView: React.FC<StocktakeViewProps> = ({ onNavigateToInvent
 
   // 9. Print Report
   const handlePrint = () => {
+    document.title = 'محضر جرد - ' + new Date().toLocaleDateString('ar-IQ');
     window.print();
   };
 
@@ -758,7 +762,7 @@ export const StocktakeView: React.FC<StocktakeViewProps> = ({ onNavigateToInvent
               </div>
 
               {/* 3. Fast Barcode Scanner & Filters Bar */}
-              <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs space-y-3">
+              <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs space-y-3 print:hidden">
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
                   {/* Fast Barcode Scanner Input */}
                   <div className="md:col-span-5">
@@ -879,6 +883,19 @@ export const StocktakeView: React.FC<StocktakeViewProps> = ({ onNavigateToInvent
                 </div>
               </div>
 
+              {/* Print Header */}
+              <div className="hidden print:block mb-6 border-b-2 border-slate-900 pb-4">
+                <div className="flex justify-between items-center mb-2">
+                  <h1 className="text-2xl font-black">صيدلية دوائي</h1>
+                  <h2 className="text-xl font-bold">محضر جرد مخزني</h2>
+                </div>
+                <div className="flex justify-between text-sm font-bold">
+                  <div>العنوان: {session?.title}</div>
+                  <div>التاريخ: {new Date().toLocaleDateString('ar-IQ')}</div>
+                  <div>الحالة: {isCompleted ? 'معتمد' : 'قيد العد'}</div>
+                </div>
+              </div>
+
               {/* 4. Interactive Items Counting Table */}
               <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden print:border-none print:shadow-none">
                 <div className="overflow-x-auto">
@@ -992,14 +1009,26 @@ export const StocktakeView: React.FC<StocktakeViewProps> = ({ onNavigateToInvent
                                       type="number"
                                       min="0"
                                       disabled={isCompleted}
-                                      value={it.countedPacks !== undefined ? it.countedPacks : ''}
+                                      value={localCounts[it.id]?.packs !== undefined ? localCounts[it.id].packs : (it.countedPacks !== undefined ? it.countedPacks : '')}
                                       onChange={(e) => {
+                                        setLocalCounts(prev => ({ ...prev, [it.id]: { ...prev[it.id], packs: e.target.value } }));
+                                      }}
+                                      onBlur={(e) => {
                                         const p = Math.max(0, parseInt(e.target.value, 10) || 0);
-                                        handleSaveCount(it.id, p, it.countedLoose || 0);
+                                        const l = Math.max(0, parseInt(localCounts[it.id]?.loose !== undefined ? localCounts[it.id].loose! : String(it.countedLoose || 0), 10) || 0);
+                                        handleSaveCount(it.id, p, l);
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.currentTarget.blur();
+                                        }
                                       }}
                                       placeholder="علب"
-                                      className="w-16 px-2 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-black text-center text-indigo-950 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden disabled:bg-slate-100"
+                                      className="w-16 px-2 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-black text-center text-indigo-950 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden disabled:bg-slate-100 print:hidden"
                                     />
+                                    <span className="hidden print:block font-black text-center">
+                                      {localCounts[it.id]?.packs !== undefined ? localCounts[it.id].packs : (it.countedPacks !== undefined ? it.countedPacks : '')}
+                                    </span>
                                     <span className="text-[10px] text-slate-500 font-bold">علبة</span>
                                   </div>
 
@@ -1010,14 +1039,26 @@ export const StocktakeView: React.FC<StocktakeViewProps> = ({ onNavigateToInvent
                                         min="0"
                                         max={it.unitsPerPack - 1}
                                         disabled={isCompleted}
-                                        value={it.countedLoose !== undefined ? it.countedLoose : ''}
+                                        value={localCounts[it.id]?.loose !== undefined ? localCounts[it.id].loose : (it.countedLoose !== undefined ? it.countedLoose : '')}
                                         onChange={(e) => {
+                                          setLocalCounts(prev => ({ ...prev, [it.id]: { ...prev[it.id], loose: e.target.value } }));
+                                        }}
+                                        onBlur={(e) => {
+                                          const p = Math.max(0, parseInt(localCounts[it.id]?.packs !== undefined ? localCounts[it.id].packs! : String(it.countedPacks || 0), 10) || 0);
                                           const l = Math.max(0, parseInt(e.target.value, 10) || 0);
-                                          handleSaveCount(it.id, it.countedPacks || 0, l);
+                                          handleSaveCount(it.id, p, l);
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.currentTarget.blur();
+                                          }
                                         }}
                                         placeholder="أشرطة"
-                                        className="w-12 px-1.5 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-black text-center text-blue-950 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden disabled:bg-slate-100"
+                                        className="w-12 px-1.5 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-black text-center text-blue-950 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden disabled:bg-slate-100 print:hidden"
                                       />
+                                      <span className="hidden print:block font-black text-center">
+                                        {localCounts[it.id]?.loose !== undefined ? localCounts[it.id].loose : (it.countedLoose !== undefined ? it.countedLoose : '')}
+                                      </span>
                                       <span className="text-[10px] text-slate-500 font-bold">شريط</span>
                                     </div>
                                   )}
@@ -1107,6 +1148,18 @@ export const StocktakeView: React.FC<StocktakeViewProps> = ({ onNavigateToInvent
                       )}
                     </tbody>
                   </table>
+                </div>
+              </div>
+
+              {/* Print Footer / Signatures */}
+              <div className="hidden print:flex justify-between items-end mt-12 pt-8 border-t border-slate-300">
+                <div className="text-center w-1/3">
+                  <div className="mb-8 font-bold">توقيع الصيدلي المسؤول</div>
+                  <div className="border-b border-slate-400 w-3/4 mx-auto"></div>
+                </div>
+                <div className="text-center w-1/3">
+                  <div className="mb-8 font-bold">توقيع لجنة الجرد</div>
+                  <div className="border-b border-slate-400 w-3/4 mx-auto"></div>
                 </div>
               </div>
             </>

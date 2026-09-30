@@ -72,6 +72,17 @@ export const ReportsView: React.FC = () => {
 
   // Search filter inside tables
   const [tableSearch, setTableSearch] = useState('');
+  const [reportPage, setReportPage] = useState(1);
+  const REPORT_PAGE_SIZE = 100;
+
+  useEffect(() => {
+    setTableSearch('');
+    setReportPage(1);
+  }, [activeTab]);
+
+  useEffect(() => {
+    setReportPage(1);
+  }, [tableSearch]);
 
   // Loading States
   const [loading, setLoading] = useState(false);
@@ -340,10 +351,61 @@ export const ReportsView: React.FC = () => {
       mv.extra?.toLowerCase().includes(tableSearch.toLowerCase()),
   );
 
+  const paginatedCurrentStock = filteredCurrentStock.slice((reportPage - 1) * REPORT_PAGE_SIZE, reportPage * REPORT_PAGE_SIZE);
+  const paginatedSoldStock = filteredSoldStock.slice((reportPage - 1) * REPORT_PAGE_SIZE, reportPage * REPORT_PAGE_SIZE);
+  const paginatedReturns = filteredReturns.slice((reportPage - 1) * REPORT_PAGE_SIZE, reportPage * REPORT_PAGE_SIZE);
+
+  const renderPagination = (totalItems: number) => {
+    const totalPages = Math.ceil(totalItems / REPORT_PAGE_SIZE);
+    if (totalPages <= 1) return null;
+    return (
+      <div className="flex items-center justify-between p-4 border-t border-slate-200 bg-slate-50 print:hidden">
+        <span className="text-xs font-bold text-slate-500">
+          عرض {(reportPage - 1) * REPORT_PAGE_SIZE + 1} إلى {Math.min(reportPage * REPORT_PAGE_SIZE, totalItems)} من {totalItems}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setReportPage(p => Math.max(1, p - 1))}
+            disabled={reportPage === 1}
+            className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold disabled:opacity-50 cursor-pointer"
+          >
+            السابق
+          </button>
+          <span className="text-xs font-bold text-slate-700">
+            صفحة {reportPage} من {totalPages}
+          </span>
+          <button
+            onClick={() => setReportPage(p => Math.min(totalPages, p + 1))}
+            disabled={reportPage === totalPages}
+            className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold disabled:opacity-50 cursor-pointer"
+          >
+            التالي
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col gap-5 pb-12 font-sans">
+      {/* Print Styles & Header */}
+      <style>{`
+        @media print {
+          @page { size: auto; margin: 15mm; }
+          body { background: white; -webkit-print-color-adjust: exact; }
+          table { width: 100% !important; page-break-inside: auto; }
+          tr { page-break-inside: avoid; page-break-after: auto; }
+          th, td { padding: 8px !important; }
+          .print-section { display: block !important; width: 100% !important; }
+        }
+      `}</style>
+      <div className="hidden print:block text-center pb-4 border-b border-gray-200 mb-4">
+        <h1 className="text-2xl font-bold mb-1">صيدلية دوائي</h1>
+        <p className="text-sm text-gray-500">تاريخ التقرير: {new Date().toLocaleDateString('ar-IQ')}</p>
+      </div>
+
       {/* 1. Header & Tabs */}
-      <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4 print:hidden">
         {/* Navigation Tabs */}
         <div className="flex items-center gap-1.5 bg-slate-100/80 p-1.5 rounded-2xl w-full md:w-auto overflow-x-auto">
           <button
@@ -482,7 +544,10 @@ export const ReportsView: React.FC = () => {
         {/* Action Tools: Print */}
         <div className="flex items-center gap-2 self-end md:self-auto">
           <button
-            onClick={() => window.print()}
+            onClick={() => {
+              document.title = 'تقرير - ' + new Date().toLocaleDateString('ar-IQ');
+              window.print();
+            }}
             className="flex items-center gap-1 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
           >
             <Printer className="w-3.5 h-3.5" />
@@ -500,7 +565,7 @@ export const ReportsView: React.FC = () => {
 
       {/* 2. Periodic Filters (For Sold, Debts, and Financial tabs) */}
       {activeTab !== 'inventory' && activeTab !== 'shortages' && activeTab !== 'dead_stock' && activeTab !== 'forecast' && (
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 print:hidden">
           {/* Quick Presets */}
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-bold text-slate-400 ml-1">الفترة:</span>
@@ -555,9 +620,9 @@ export const ReportsView: React.FC = () => {
 
       {/* TAB 0: قائمة النواقص المسندة للمذاخر (Shortages & Supplier Reorder List) */}
       {activeTab === 'shortages' && (
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-5 print-section">
           {/* Top Filter & Action Bar */}
-          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
+          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4 print:hidden">
             {/* Severity Quick Filters */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
@@ -891,7 +956,7 @@ export const ReportsView: React.FC = () => {
 
       {/* TAB 1: جرد المخزون الحالي */}
       {activeTab === 'inventory' && (
-        <div className="space-y-4">
+        <div className="space-y-4 print-section">
           {/* Inventory KPI Summary */}
           {inventoryValuation && (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -984,16 +1049,16 @@ export const ReportsView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
-                  {filteredCurrentStock.length === 0 ? (
+                  {paginatedCurrentStock.length === 0 ? (
                     <tr>
                       <td colSpan={10} className="p-8 text-center text-slate-400 font-bold">
                         لا توجد مواد مطابقة للبحث
                       </td>
                     </tr>
                   ) : (
-                    filteredCurrentStock.map((item, idx) => (
+                    paginatedCurrentStock.map((item, idx) => (
                       <tr key={item.inventoryItemId} className="hover:bg-slate-50/70 transition-colors">
-                        <td className="p-3 text-center text-slate-400 font-bold">{idx + 1}</td>
+                        <td className="p-3 text-center text-slate-400 font-bold">{((reportPage - 1) * REPORT_PAGE_SIZE) + idx + 1}</td>
                         <td className="p-3">
                           <div className="font-bold text-slate-900">{item.tradeName}</div>
                           {item.customName && (
@@ -1032,13 +1097,14 @@ export const ReportsView: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            {renderPagination(filteredCurrentStock.length)}
           </div>
         </div>
       )}
 
       {/* TAB 2: تحليل ربحية كل منتج ومقارنة حجم المبيعات بالأرباح الحقيقية */}
       {activeTab === 'sold' && (
-        <div className="space-y-5">
+        <div className="space-y-5 print-section">
           {/* Top 4 Profitability Analytics Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {/* Card 1: Total Profit */}
@@ -1310,7 +1376,7 @@ export const ReportsView: React.FC = () => {
 
       {/* TAB 3: كشف الديون وحسابات المشتريات */}
       {activeTab === 'debts' && (
-        <div className="space-y-4">
+        <div className="space-y-4 print-section">
           {debtsReport && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
@@ -1417,7 +1483,7 @@ export const ReportsView: React.FC = () => {
 
       {/* TAB 4: كشف الأرباح والتقرير المالي */}
       {activeTab === 'financial' && financialData && (
-        <div className="space-y-5">
+        <div className="space-y-5 print-section">
           {/* Top 4 Financial KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
@@ -1523,7 +1589,7 @@ export const ReportsView: React.FC = () => {
 
       {/* 5. Net Profit (P&L) Tab View */}
       {activeTab === 'net_profit' && netProfitReport && (
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-5 print-section">
           {/* Key Metrics Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
@@ -1631,9 +1697,9 @@ export const ReportsView: React.FC = () => {
 
       {/* 6. Dead Stock (Stagnant Inventory & Frozen Capital Discovery) Tab View */}
       {activeTab === 'dead_stock' && (
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-5 print-section">
           {/* Top Threshold & Action Bar */}
-          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
+          <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4 print:hidden">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
                 <Clock className="w-4 h-4 text-amber-600" />
@@ -1909,7 +1975,7 @@ export const ReportsView: React.FC = () => {
 
       {/* TAB 7: SMART STOCK FORECAST & RUNOUT PREDICTION */}
       {activeTab === 'forecast' && (
-        <div className="space-y-6">
+        <div className="space-y-6 print-section">
           {/* AI Banner */}
           <div className="bg-linear-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 rounded-3xl border border-slate-800 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -2136,7 +2202,7 @@ export const ReportsView: React.FC = () => {
 
       {/* 9. SHIFTS AUDIT TAB */}
       {activeTab === 'shifts' && (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 print-section">
           {/* Top Info & Action Bar */}
           <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
             <div>
@@ -2478,7 +2544,7 @@ export const ReportsView: React.FC = () => {
 
       {/* 10. RETURNS & SPOILAGE AUDIT TAB */}
       {activeTab === 'returns' && (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 print-section">
           {/* Top Info & Action Bar */}
           <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
             <div>
@@ -2719,18 +2785,18 @@ export const ReportsView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                  {filteredReturns.length === 0 ? (
+                  {paginatedReturns.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="p-8 text-center text-slate-400 font-bold">
                         لا توجد حركات إرجاع مسجلة ضمن الفترة المحددة
                       </td>
                     </tr>
                   ) : (
-                    filteredReturns.map((it: any, idx: number) => {
+                    paginatedReturns.map((it: any, idx: number) => {
                       const isResaleable = it.itemCondition === 'RESALEABLE';
                       return (
                         <tr key={it.id || idx} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="p-3 font-mono text-slate-400">{idx + 1}</td>
+                          <td className="p-3 font-mono text-slate-400">{((reportPage - 1) * REPORT_PAGE_SIZE) + idx + 1}</td>
                           <td className="p-3">
                             <div className="font-black text-slate-900">{it.tradeName}</div>
                             {it.scientificName && (
@@ -2780,13 +2846,14 @@ export const ReportsView: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            {renderPagination(filteredReturns.length)}
           </div>
         </div>
       )}
 
       {/* 11. MEDICINE KARDEX & DETAILED AUDIT TRAIL TAB */}
       {activeTab === 'kardex' && (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 print-section">
           {/* Search Medicine Input Banner */}
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs flex flex-col gap-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

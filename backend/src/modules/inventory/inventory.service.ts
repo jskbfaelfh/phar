@@ -1223,7 +1223,7 @@ export class InventoryService {
         b.selling_price_pack as "sellingPricePack",
         b.selling_price_unit as "sellingPriceUnit",
         b.quantity_units_remaining as "quantityUnitsRemaining",
-        TO_CHAR(b.expiry_date, 'MM/YYYY') as "expiryFormatted",
+        TO_CHAR(b.expiry_date, 'YYYY/MM') as "expiryFormatted",
         b.expiry_date as "expiryDate",
         (b.expiry_date < CURRENT_DATE) as "isExpired",
         b.is_recalled as "isRecalled",
@@ -1231,15 +1231,97 @@ export class InventoryService {
         b.supplier_id as "supplierId",
         b.purchase_id as "purchaseId",
         s.name as "supplierName",
+        p.invoice_number as "invoiceNumber",
+        i.units_per_pack as "unitsPerPack",
         b.created_at as "createdAt"
       FROM "${schemaName}".inventory_batches b
       LEFT JOIN "${schemaName}".suppliers s ON b.supplier_id = s.id
-      WHERE b.inventory_item_id = $1::uuid AND b.quantity_units_remaining > 0
-      ORDER BY b.expiry_date ASC;
+      LEFT JOIN "${schemaName}".purchases p ON b.purchase_id = p.id
+      JOIN "${schemaName}".inventory_items i ON b.inventory_item_id = i.id
+      WHERE b.inventory_item_id = $1::uuid
+      ORDER BY b.created_at DESC;
     `;
 
     const batches: any[] = await this.prisma.$queryRawUnsafe(sql, inventoryItemId);
     return batches;
+  }
+
+  /**
+   * Update a single batch's editable fields
+   */
+  async updateBatch(batchId: string, dto: {
+    batchNumber?: string;
+    quantityUnitsRemaining?: number;
+    purchasePricePack?: number;
+    sellingPricePack?: number;
+    sellingPriceUnit?: number;
+    expiryDate?: string; // YYYY-MM format or YYYY-MM-DD
+    unitsPerPack?: number;
+  }) {
+    const schemaName = this.tenantContext.getSchemaName();
+
+    const setClauses: string[] = [];
+    const params: any[] = [];
+    let idx = 1;
+
+    if (dto.batchNumber !== undefined) {
+      setClauses.push(`batch_number = $${idx++}`);
+      params.push(dto.batchNumber || null);
+    }
+    if (dto.quantityUnitsRemaining !== undefined) {
+      setClauses.push(`quantity_units_remaining = $${idx++}`);
+      params.push(Math.max(0, Number(dto.quantityUnitsRemaining)));
+    }
+    if (dto.purchasePricePack !== undefined) {
+      setClauses.push(`purchase_price_pack = $${idx++}`);
+      params.push(Number(dto.purchasePricePack));
+    }
+    if (dto.sellingPricePack !== undefined) {
+      setClauses.push(`selling_price_pack = $${idx++}`);
+      params.push(Number(dto.sellingPricePack));
+    }
+    if (dto.sellingPriceUnit !== undefined) {
+      setClauses.push(`selling_price_unit = $${idx++}`);
+      params.push(Number(dto.sellingPriceUnit));
+    }
+    if (dto.expiryDate !== undefined && dto.expiryDate) {
+      // Accept YYYY/MM or YYYY-MM → convert to first day of month
+      const cleaned = dto.expiryDate.replace('/', '-');
+      const dateVal = cleaned.length === 7 ? `${cleaned}-01` : cleaned;
+      setClauses.push(`expiry_date = $${idx++}`);
+      params.push(dateVal);
+    }
+
+    // units_per_pack lives on inventory_items, not batches
+    if (dto.unitsPerPack !== undefined && Number(dto.unitsPerPack) > 0) {
+      // Get inventory_item_id for this batch first
+      const batchRow: any[] = await this.prisma.$queryRawUnsafe(
+        `SELECT inventory_item_id FROM "${schemaName}".inventory_batches WHERE id = $1::uuid`,
+        batchId,
+      );
+      if (batchRow.length > 0) {
+        await this.prisma.$queryRawUnsafe(
+          `UPDATE "${schemaName}".inventory_items SET units_per_pack = $1 WHERE id = $2::uuid`,
+          Number(dto.unitsPerPack),
+          batchRow[0].inventory_item_id,
+        );
+      }
+    }
+
+    if (setClauses.length === 0) {
+      return { message: 'لا يوجد تغييرات لحفظها' };
+    }
+
+    params.push(batchId);
+    const sql = `
+      UPDATE "${schemaName}".inventory_batches
+      SET ${setClauses.join(', ')}
+      WHERE id = $${idx}::uuid
+      RETURNING id, batch_number as "batchNumber", quantity_units_remaining as "quantityUnitsRemaining"
+    `;
+
+    const result: any[] = await this.prisma.$queryRawUnsafe(sql, ...params);
+    return { message: 'تم تحديث الوجبة بنجاح', batch: result[0] };
   }
 
   /**

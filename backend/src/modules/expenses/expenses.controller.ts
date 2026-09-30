@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
   Request,
+  Patch,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { SubscriptionGuard } from '../../common/guards/subscription.guard';
@@ -35,6 +36,11 @@ export class ExpensesController {
     @Query('endDate') endDate?: string,
   ) {
     return this.expensesService.getExpenses(req.user.tenantId, category, startDate, endDate);
+  }
+
+  @Patch(':id')
+  updateExpense(@Request() req: any, @Param('id') id: string, @Body() dto: any) {
+    return this.expensesService.updateExpense(id, dto, req.user.tenantId);
   }
 
   @Delete(':id')

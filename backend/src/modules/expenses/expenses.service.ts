@@ -130,4 +130,57 @@ export class ExpensesService {
 
     return { message: 'تم حذف المصروف بنجاح' };
   }
+
+  /**
+   * Update an expense entry
+   */
+  async updateExpense(id: string, dto: any, tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant || !tenant.schemaName) throw new NotFoundException('الصيدلية غير متوفرة');
+
+    const schema = validateAndSanitizeSchemaName(tenant.schemaName);
+    
+    const updateFields: string[] = [];
+    const params: any[] = [];
+
+    if (dto.amount !== undefined) {
+      params.push(dto.amount);
+      updateFields.push(`"amount" = $${params.length}`);
+    }
+    if (dto.category !== undefined) {
+      params.push(dto.category);
+      updateFields.push(`"category" = $${params.length}`);
+    }
+    if (dto.description !== undefined) {
+      params.push(dto.description);
+      updateFields.push(`"notes" = $${params.length}`);
+    }
+    if (dto.expenseDate !== undefined) {
+      params.push(new Date(dto.expenseDate));
+      updateFields.push(`"expense_date" = $${params.length}`);
+    }
+
+    if (updateFields.length === 0) {
+      return { message: 'لا توجد حقول للتحديث' };
+    }
+
+    params.push(id);
+    const idIndex = params.length;
+
+    const result = await this.prisma.$queryRawUnsafe<any[]>(`
+      UPDATE "${schema}"."expenses"
+      SET ${updateFields.join(', ')}
+      WHERE id = $${idIndex}::uuid
+      RETURNING *;
+    `, ...params);
+
+    if (!result || result.length === 0) {
+      throw new NotFoundException('المصروف غير موجود');
+    }
+
+    return {
+      message: 'تم تحديث المصروف بنجاح',
+      expense: result[0],
+    };
+  }
 }

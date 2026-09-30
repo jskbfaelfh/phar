@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import {
   PackagePlus,
   Search,
@@ -340,7 +341,7 @@ export const BulkStockEntryView: React.FC = () => {
       discountPercent: discount,
       purchasePricePack: purchasePrice,
       sellingPricePack: sellingPrice,
-      sellingPriceUnit: sellingPrice,
+      sellingPriceUnit: unitsPerPk > 1 ? Math.round(sellingPrice / unitsPerPk) : sellingPrice,
       officialPricePack: sellingPrice,
       officialPriceUnit: sellingPrice,
       expiryMonth,
@@ -383,10 +384,91 @@ export const BulkStockEntryView: React.FC = () => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      setImportText(text);
+      try {
+        const data = new Uint8Array(ev.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' });
+        
+        const currentYear = new Date().getFullYear();
+        const newItems: TableRowItem[] = [];
+        
+        // Skip header row (row 0), process from row 1
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          if (!row || row.length === 0 || !row[0]) continue;
+          
+          const tradeName = String(row[0] || '').trim();
+          if (!tradeName) continue;
+          
+          const batchNumber = String(row[1] || '').trim();
+          
+          const expiryRaw = String(row[2] || '').trim();
+          let expiryMonth = 12;
+          let expiryYear = currentYear + 2;
+          if (expiryRaw) {
+            const parts = expiryRaw.split(/[\/\-\\]/);
+            if (parts.length >= 2) {
+              const p1 = parseInt(parts[0], 10);
+              const p2 = parseInt(parts[1], 10);
+              if (p1 > 2000) {
+                expiryYear = p1;
+                expiryMonth = p2;
+              } else if (p2 > 2000) {
+                expiryYear = p2;
+                expiryMonth = p1;
+              }
+            }
+          }
+          
+          const quantityPacks = parseInt(String(row[3]), 10) || 1;
+          const purchasePricePack = parseFloat(String(row[4])) || 0;
+          const explicitSellingPrice = parseFloat(String(row[5])) || 0;
+          
+          const sellingPricePack = explicitSellingPrice > 0 
+            ? explicitSellingPrice 
+            : (purchasePricePack > 0 ? Math.round(purchasePricePack * 1.2) : 0);
+            
+          const item: TableRowItem = {
+            tempId: `excel-import-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`,
+            tradeName,
+            scientificName: '',
+            unitsPerPack: 1,
+            quantityPacks,
+            bonusPacks: 0,
+            amortizeBonus: true,
+            discountPercent: 0,
+            purchasePricePack,
+            sellingPricePack,
+            sellingPriceUnit: sellingPricePack,
+            officialPricePack: sellingPricePack,
+            officialPriceUnit: sellingPricePack,
+            expiryMonth,
+            expiryYear,
+            batchNumber,
+            isNewMedicine: true,
+          };
+          
+          newItems.push(item);
+        }
+        
+        if (newItems.length > 0) {
+          setItems((prev) => [...newItems, ...prev]);
+          setShowImportModal(false);
+          setMessage({
+            type: 'success',
+            text: `تم استيراد ${newItems.length} صنف من الإكسل بنجاح`,
+          });
+        } else {
+          setImportError('لم يتم العثور على بيانات صالحة في الملف');
+        }
+      } catch (err) {
+        console.error('Excel import error:', err);
+        setImportError('حدث خطأ أثناء قراءة ملف الإكسل');
+      }
     };
-    reader.readAsText(file, 'utf-8');
+    reader.readAsArrayBuffer(file);
     e.target.value = '';
   };
   // ─────────────────────────────────────────────────────────────────────────

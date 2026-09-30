@@ -74,8 +74,8 @@ export class SearchService {
       ];
     }
 
-    // 2. Fetch Primary Search Matches
-    const rawResults = await this.prisma.centralSearchIndex.findMany({
+    // 2. Fetch Primary Search Matches (exact/ILIKE first)
+    let rawResults = await this.prisma.centralSearchIndex.findMany({
       where,
       take: Math.min(Number(limit) * 2, 100),
       include: {
@@ -89,6 +89,74 @@ export class SearchService {
         },
       },
     });
+
+    // 2b. Trigram Fuzzy Fallback — if no results and term exists, use pg_trgm similarity
+    if (term.length >= 3 && rawResults.length === 0) {
+      try {
+        // Build governorate filter for raw SQL
+        const govFilter = where.governorate
+          ? `AND csi.governorate ILIKE $2`
+          : '';
+        const govParam = where.governorate
+          ? (where.governorate as any).contains
+          : null;
+
+        const districtFilter = where.district
+          ? (govParam ? `AND csi.district ILIKE $3` : `AND csi.district ILIKE $2`)
+          : '';
+        const districtParam = where.district
+          ? (where.district as any).contains
+          : null;
+
+        const extraParams: any[] = [];
+        if (govParam) extraParams.push(govParam);
+        if (districtParam) extraParams.push(districtParam);
+        const limitParamIndex = 2 + extraParams.length;
+
+        const fuzzyIds = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+          `SELECT csi.id
+           FROM public.central_search_index csi
+           JOIN public.tenants t ON csi.tenant_id = t.id
+           WHERE t.is_search_visible = true
+             AND t.subscription_status = 'ACTIVE'
+             AND csi.is_available = true
+             AND (
+               word_similarity($1, csi.trade_name) > 0.4
+               OR word_similarity($1, csi.scientific_name) > 0.4
+               OR csi.trade_name ILIKE '%' || $1 || '%'
+             )
+             ${govFilter}
+             ${districtFilter}
+           ORDER BY GREATEST(
+             word_similarity($1, csi.trade_name),
+             word_similarity($1, coalesce(csi.scientific_name,''))
+           ) DESC
+           LIMIT $${limitParamIndex}`,
+          term,
+          ...extraParams,
+          Math.min(Number(limit) * 2, 100),
+        );
+
+        if (fuzzyIds.length > 0) {
+          const ids = fuzzyIds.map((r) => r.id);
+          rawResults = await this.prisma.centralSearchIndex.findMany({
+            where: { id: { in: ids } },
+            include: {
+              medicine: {
+                select: {
+                  dosageForm: true,
+                  strength: true,
+                  manufacturer: true,
+                  barcode: true,
+                },
+              },
+            },
+          });
+        }
+      } catch (_e) {
+        // pg_trgm not available — silently fall back to empty results
+      }
+    }
 
     // 3. Format primary results with Privacy Masking & Distance
     const formatItem = (item: any) => {

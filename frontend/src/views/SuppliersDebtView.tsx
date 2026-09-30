@@ -37,6 +37,14 @@ export const SuppliersDebtView: React.FC = () => {
   const [filterMode, setFilterMode] = useState<'ALL' | 'DEBT_ONLY' | 'SETTLED_ONLY'>('ALL');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Pagination
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 100;
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, filterMode]);
+
   // Modals state
   const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<any | null>(null);
@@ -256,7 +264,21 @@ export const SuppliersDebtView: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col gap-5 pb-20">
+    <div className="flex flex-col gap-5 pb-20 suppliers-debt-view">
+      <style>{`
+        @media print {
+          @page { size: auto; margin: 10mm; }
+          body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .suppliers-debt-view > div:not(.modal-overlay) { display: none !important; }
+          .modal-overlay { position: static !important; background: white !important; padding: 0 !important; }
+          .modal-content { border: none !important; box-shadow: none !important; max-height: none !important; overflow: visible !important; width: 100% !important; max-width: 100% !important; }
+          .modal-close-btn, .print\\:hidden, .tabs-header { display: none !important; }
+          .print-header { display: block !important; }
+          table { width: 100% !important; border-collapse: collapse; page-break-inside: auto; }
+          tr { page-break-inside: avoid; page-break-after: auto; }
+          th, td { border: 1px solid #e2e8f0; padding: 8px !important; }
+        }
+      `}</style>
       {/* 1. Header & Top Overview Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         {/* Card 1: Total Outstanding Debt */}
@@ -447,13 +469,13 @@ export const SuppliersDebtView: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredSuppliers.map((s, idx) => {
+                filteredSuppliers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((s, idx) => {
                   const debt = Number(s.totalRemainingDebt || 0);
                   const isSettled = debt === 0;
 
                   return (
                     <tr key={s.id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="p-3 text-center text-slate-400 font-bold">{idx + 1}</td>
+                      <td className="p-3 text-center text-slate-400 font-bold">{((page - 1) * PAGE_SIZE) + idx + 1}</td>
 
                       {/* Supplier Name */}
                       <td className="p-3">
@@ -563,13 +585,42 @@ export const SuppliersDebtView: React.FC = () => {
             </tbody>
           </table>
         </div>
+        {/* Pagination Controls */}
+        {filteredSuppliers.length > PAGE_SIZE && (
+          <div className="flex items-center justify-between p-4 border-t border-slate-200 bg-slate-50 print:hidden">
+            <span className="text-xs font-bold text-slate-500">
+              عرض {(page - 1) * PAGE_SIZE + 1} إلى {Math.min(page * PAGE_SIZE, filteredSuppliers.length)} من {filteredSuppliers.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold disabled:opacity-50 cursor-pointer"
+              >
+                السابق
+              </button>
+              <span className="text-xs font-bold text-slate-700">
+                صفحة {page} من {Math.ceil(filteredSuppliers.length / PAGE_SIZE)}
+              </span>
+              <button
+                onClick={() => setPage(p => Math.min(Math.ceil(filteredSuppliers.length / PAGE_SIZE), p + 1))}
+                disabled={page === Math.ceil(filteredSuppliers.length / PAGE_SIZE)}
+                className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold disabled:opacity-50 cursor-pointer"
+              >
+                التالي
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modal 1: Add / Edit Supplier Modal */}
       {showAddSupplierModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl border border-slate-200">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 modal-header print:hidden">
+                {/* This header has the modal close button, we hide it in print */}
+                <style>{`@media print { .modal-header { display: none !important; } }`}</style>
               <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-indigo-600" />
                 {editingSupplier ? 'تعديل مذخر' : 'إضافة مذخر'}
@@ -649,7 +700,9 @@ export const SuppliersDebtView: React.FC = () => {
       {payingSupplier && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl border border-slate-200">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 modal-header print:hidden">
+                {/* This header has the modal close button, we hide it in print */}
+                <style>{`@media print { .modal-header { display: none !important; } }`}</style>
               <div>
                 <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
                   <Banknote className="w-5 h-5 text-emerald-600" />
@@ -1020,11 +1073,26 @@ export const SuppliersDebtView: React.FC = () => {
       )}
 
       {/* Modal 3: Account Statement & Invoices Ledger Modal */}
-      {ledgerSupplier && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl p-5 max-w-3xl w-full shadow-2xl border border-slate-200 max-h-[90vh] flex flex-col">
+        {ledgerSupplier && (
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 modal-overlay print:p-0">
+            <div className="bg-white rounded-2xl p-5 max-w-3xl w-full shadow-2xl border border-slate-200 max-h-[90vh] flex flex-col modal-content">
+              {/* Print Header inside Modal */}
+              <div className="hidden print:block text-center pb-4 border-b border-slate-300 mb-4 print-header">
+                <h1 className="text-2xl font-bold mb-2">صيدلية دوائي</h1>
+                <h2 className="text-lg mb-2">كشف حساب مجهز</h2>
+                <p className="text-sm text-slate-500">
+                  المجهز: {ledgerSupplier.name} | التاريخ: {new Date().toLocaleDateString('ar-IQ')}
+                </p>
+                {ledgerData && (
+                   <p className="text-sm font-bold mt-2">
+                     إجمالي الرصيد المتبقي: {Number(ledgerData.summary.totalDebt).toLocaleString()} د.ع
+                   </p>
+                )}
+              </div>
             {/* Modal Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 modal-header print:hidden">
+                {/* This header has the modal close button, we hide it in print */}
+                <style>{`@media print { .modal-header { display: none !important; } }`}</style>
               <div>
                 <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
                   <FileText className="w-5 h-5 text-indigo-600" />
@@ -1228,11 +1296,21 @@ export const SuppliersDebtView: React.FC = () => {
               )}
             </div>
 
-            <div className="pt-4 border-t border-slate-100 flex justify-end">
-              <button
-                onClick={() => setLedgerSupplier(null)}
-                className="px-5 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold cursor-pointer"
-              >
+            <div className="pt-4 border-t border-slate-100 flex justify-end gap-2 print:hidden">
+                <button
+                  onClick={() => {
+                    document.title = 'كشف حساب - ' + ledgerSupplier.name + ' - ' + new Date().toLocaleDateString('ar-IQ');
+                    window.print();
+                  }}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5"
+                >
+                  <Printer className="w-4 h-4" />
+                  طباعة كشف الحساب
+                </button>
+                <button
+                  onClick={() => setLedgerSupplier(null)}
+                  className="px-5 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold cursor-pointer modal-close-btn"
+                >
                 إغلاق
               </button>
             </div>

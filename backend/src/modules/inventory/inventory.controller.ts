@@ -181,4 +181,10 @@ export class InventoryController {
   async toggleItemPublicVisibility(@Param('id') id: string) {
     return this.inventoryService.toggleItemPublicVisibility(id);
   }
+
+  @Patch('batches/:batchId/update')
+  @Roles('OWNER')
+  async updateBatch(@Param('batchId') batchId: string, @Body() dto: any) {
+    return this.inventoryService.updateBatch(batchId, dto);
+  }
 }

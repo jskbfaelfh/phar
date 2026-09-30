@@ -415,7 +415,7 @@ export class PosService {
               }
             }
 
-            const discountAmount = Math.min(Number(dto.discountAmount || 0), subtotal);
+            const discountAmount = Math.min(Math.max(0, Number(dto.discountAmount || 0)), subtotal);
             const totalAmount = Math.max(0, subtotal - discountAmount);
 
             // D. Insert sales record using parameterized query with offline_id and customer_name

@@ -238,6 +238,13 @@ export const PosView: React.FC = () => {
   const [closingShift, setClosingShift] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showActualPrices, setShowActualPrices] = useState(false);
+  const [pharmacyProfile, setPharmacyProfile] = useState<any>(null);
+
+  useEffect(() => {
+    if (navigator.onLine) {
+      apiRequest('/pharmacy/profile').then(res => setPharmacyProfile(res)).catch(() => {});
+    }
+  }, []);
 
   // Cart Custom Price Editing State
   const [editingPriceIndex, setEditingPriceIndex] = useState<number | null>(null);
@@ -533,14 +540,18 @@ export const PosView: React.FC = () => {
     const timer = setTimeout(async () => {
       if (navigator.onLine) {
         try {
-          const data = await apiRequest<SearchMedicine[]>(`/inventory?availableOnly=true&search=${encodeURIComponent(searchTerm)}`);
-          const available = (Array.isArray(data) ? data : []).filter((med) => {
-            const units = Number(med.validUnitsRemaining ?? med.totalUnitsRemaining ?? 0);
-            const pks = Number(med.availablePacks ?? 0);
-            const strs = Number(med.availableStrips ?? 0);
-            return units > 0 || pks > 0 || strs > 0;
+          // جلب كل الأدوية (متوفرة + نافدة) لإظهارها في البحث
+          const data = await apiRequest<SearchMedicine[]>(`/inventory?search=${encodeURIComponent(searchTerm)}`);
+          const all = (Array.isArray(data) ? data : []);
+          // ترتيب: المتوفرة أولاً، ثم النافدة
+          all.sort((a, b) => {
+            const aUnits = Number(a.validUnitsRemaining ?? a.totalUnitsRemaining ?? 0);
+            const bUnits = Number(b.validUnitsRemaining ?? b.totalUnitsRemaining ?? 0);
+            if (aUnits > 0 && bUnits <= 0) return -1;
+            if (aUnits <= 0 && bUnits > 0) return 1;
+            return 0;
           });
-          setSearchResults(available);
+          setSearchResults(all);
           return;
         } catch (err) {
           console.warn('Online search failed, falling back to local IndexedDB', err);
@@ -550,13 +561,15 @@ export const PosView: React.FC = () => {
       // Offline search fallback
       try {
         const localData = await searchLocalInventory(searchTerm);
-        const available = (Array.isArray(localData) ? localData : []).filter((med) => {
-          const units = Number(med.validUnitsRemaining ?? med.totalUnitsRemaining ?? 0);
-          const pks = Number(med.availablePacks ?? 0);
-          const strs = Number(med.availableStrips ?? 0);
-          return units > 0 || pks > 0 || strs > 0;
+        const all = (Array.isArray(localData) ? localData : []);
+        all.sort((a, b) => {
+          const aUnits = Number(a.validUnitsRemaining ?? a.totalUnitsRemaining ?? 0);
+          const bUnits = Number(b.validUnitsRemaining ?? b.totalUnitsRemaining ?? 0);
+          if (aUnits > 0 && bUnits <= 0) return -1;
+          if (aUnits <= 0 && bUnits > 0) return 1;
+          return 0;
         });
-        setSearchResults(available);
+        setSearchResults(all);
       } catch (err) {
         console.error('Offline search error:', err);
       }
@@ -1388,7 +1401,8 @@ export const PosView: React.FC = () => {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ' || e.code === 'Space') {
                     const trimmed = searchTerm.trim().toLowerCase();
-                    if (trimmed.length > 0) {
+                    const isSpace = e.key === ' ' || e.code === 'Space';
+                    if (trimmed.length > 0 && (!isSpace || /^\d+$/.test(trimmed))) {
                       const exactMatch = searchResults.find(
                         (med) => (med.barcode || '').trim().toLowerCase() === trimmed,
                       );
@@ -1406,7 +1420,7 @@ export const PosView: React.FC = () => {
                   setSearchTerm(val);
                   if (val.endsWith(' ')) {
                     const trimmed = val.trim().toLowerCase();
-                    if (trimmed.length > 0) {
+                    if (trimmed.length > 0 && /^\d+$/.test(trimmed)) {
                       const exactMatch = searchResults.find(
                         (med) => (med.barcode || '').trim().toLowerCase() === trimmed,
                       );
@@ -1486,18 +1500,35 @@ export const PosView: React.FC = () => {
               searchResults.map((med) => {
                 const hasMultipleBatches = med.activeBatches && med.activeBatches.length > 1;
                 const isExactBarcode = (med.barcode || '').trim().toLowerCase() === searchTerm.trim().toLowerCase();
-                const purchasePack = Number(med.purchasePricePack || med.activeBatches?.[0]?.purchasePricePack || 0);
+
+                // حساب الرصيد الفعلي
+                const totalAvailUnits = med.activeBatches
+                  ? med.activeBatches.reduce((sum, b) => sum + Math.max(0, Number(b.quantityUnitsRemaining || 0)), 0)
+                  : Number(med.totalUnitsRemaining || 0);
+                const isOutOfStock = totalAvailUnits <= 0;
+
+                // سعر الشراء: من آخر وجبة حتى لو خلصت
+                const lastBatch = med.activeBatches && med.activeBatches.length > 0
+                  ? [...med.activeBatches].sort((a, b) => (b.id > a.id ? 1 : -1))[0]
+                  : null;
+                const purchasePack = Number(med.purchasePricePack || lastBatch?.purchasePricePack || 0);
                 const purchaseStrip = med.unitsPerPack > 1 && purchasePack > 0 ? roundTo250(purchasePack / med.unitsPerPack) : purchasePack;
 
+                // سعر البيع: من آخر وجبة حتى لو خلصت
+                const lastSellingPack = Number(lastBatch?.sellingPricePack || med.sellingPricePack || 0);
+                const lastOfficialPack = Number(lastBatch?.sellingPricePack || med.officialPricePack || lastSellingPack || 0);
+                const lastSellingUnit = roundTo250(Number(lastBatch?.sellingPriceUnit || med.sellingPriceUnit || 0) || calculateStripPrice(lastSellingPack, med.unitsPerPack));
+                const lastOfficialUnit = roundTo250(Number(med.officialPriceUnit || lastSellingUnit));
+
                 return (
-                  <div key={med.id} className={`p-3 sm:p-4 rounded-2xl transition-all border-b border-slate-100 last:border-0 ${isExactBarcode ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-400' : 'hover:bg-slate-50/90'}`}>
+                  <div key={med.id} className={`p-3 sm:p-4 rounded-2xl transition-all border-b border-slate-100 last:border-0 ${isOutOfStock ? 'bg-rose-50/40 opacity-80' : isExactBarcode ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-400' : 'hover:bg-slate-50/90'}`}>
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2.5 flex-wrap">
                           <span className="font-black text-slate-900 text-base sm:text-lg">{med.tradeName}</span>
-                          {med.totalUnitsRemaining <= 0 ? (
-                            <span className="text-xs px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-xl font-black">
-                              نافد
+                          {isOutOfStock ? (
+                            <span className="text-xs px-2.5 py-1 bg-rose-100 text-rose-700 border border-rose-300 rounded-xl font-black flex items-center gap-1">
+                              ⛔ نافد — أدخل فاتورة شراء
                             </span>
                           ) : (
                             <span className="text-xs px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl font-black">
@@ -1511,7 +1542,7 @@ export const PosView: React.FC = () => {
                           )}
                         </div>
 
-                        {/* بطاقة سعر الشراء للعلبة والشريط */}
+                        {/* بطاقة سعر الشراء للعلبة والشريط — تظهر حتى لو الدواء نافد */}
                         <div className="flex items-center gap-2 mt-2 flex-wrap">
                           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50/90 text-amber-950 border border-amber-200 rounded-xl text-xs font-bold shadow-2xs">
                             <span className="text-amber-700 font-medium">سعر الشراء:</span>
@@ -1527,6 +1558,11 @@ export const PosView: React.FC = () => {
                               </>
                             )}
                           </div>
+                          {isOutOfStock && lastBatch && (
+                            <span className="text-xs text-slate-400 italic">
+                              (آخر وجبة: {lastBatch.batchNumber || '—'})
+                            </span>
+                          )}
                           {med.scientificName && (
                             <span className="text-xs text-slate-400 font-medium truncate max-w-[240px]" title={med.scientificName}>
                               {med.scientificName}
@@ -1536,42 +1572,76 @@ export const PosView: React.FC = () => {
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        {/* Add Pack Button */}
+                        {/* Add Pack Button — معطّل إذا نافد */}
                         <button
-                          onClick={() => addToCart(med, 'PACK')}
-                          className="flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-black shadow-md shadow-emerald-700/20 active:scale-95 transition-all cursor-pointer"
+                          onClick={() => !isOutOfStock && addToCart(med, 'PACK')}
+                          disabled={isOutOfStock}
+                          className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl text-xs sm:text-sm font-black shadow-md active:scale-95 transition-all ${
+                            isOutOfStock
+                              ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-700/20 cursor-pointer'
+                          }`}
+                          title={isOutOfStock ? 'الدواء نافد — لا يمكن البيع' : ''}
                         >
-                          <Plus className="w-4 h-4 stroke-[3]" />
-                          <span>علبة</span>
-                          <span className="font-mono font-bold bg-emerald-700/50 px-2 py-0.5 rounded-lg text-emerald-100">
-                            {(showActualPrices
-                              ? Number(med.sellingPricePack)
-                              : (Number(med.officialPricePack) || Number(med.sellingPricePack))
-                            ).toLocaleString()} د.ع
-                          </span>
+                          {isOutOfStock ? (
+                            <>
+                              <span>علبة</span>
+                              <span className="font-mono font-bold bg-slate-300/50 px-2 py-0.5 rounded-lg">
+                                {(showActualPrices ? lastSellingPack : lastOfficialPack).toLocaleString()} د.ع
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Plus className="w-4 h-4 stroke-[3]" />
+                              <span>علبة</span>
+                              <span className="font-mono font-bold bg-emerald-700/50 px-2 py-0.5 rounded-lg text-emerald-100">
+                                {(showActualPrices
+                                  ? Number(med.sellingPricePack)
+                                  : (Number(med.officialPricePack) || Number(med.sellingPricePack))
+                                ).toLocaleString()} د.ع
+                              </span>
+                            </>
+                          )}
                         </button>
 
-                        {/* Add Strip Button (Only if units per pack > 1) */}
+                        {/* Add Strip Button — معطّل إذا نافد */}
                         {med.unitsPerPack > 1 && (
                           <button
-                            onClick={() => addToCart(med, 'STRIP')}
-                            className="flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-black shadow-md shadow-blue-700/20 active:scale-95 transition-all cursor-pointer"
+                            onClick={() => !isOutOfStock && addToCart(med, 'STRIP')}
+                            disabled={isOutOfStock}
+                            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl text-xs sm:text-sm font-black shadow-md active:scale-95 transition-all ${
+                              isOutOfStock
+                                ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-700/20 cursor-pointer'
+                            }`}
+                            title={isOutOfStock ? 'الدواء نافد — لا يمكن البيع' : ''}
                           >
-                            <Layers className="w-4 h-4 stroke-[2.5]" />
-                            <span>شريط</span>
-                            <span className="font-mono font-bold bg-blue-700/50 px-2 py-0.5 rounded-lg text-blue-100">
-                              {(showActualPrices
-                                ? roundTo250(Number(med.sellingPriceUnit) || calculateStripPrice(Number(med.sellingPricePack), med.unitsPerPack))
-                                : (Number(med.officialPriceUnit) || (Number(med.officialPricePack) && med.unitsPerPack > 1 ? calculateStripPrice(Number(med.officialPricePack), med.unitsPerPack) : roundTo250(Number(med.sellingPriceUnit) || calculateStripPrice(Number(med.sellingPricePack), med.unitsPerPack))))
-                              ).toLocaleString()} د.ع
-                            </span>
+                            {isOutOfStock ? (
+                              <>
+                                <span>شريط</span>
+                                <span className="font-mono font-bold bg-slate-300/50 px-2 py-0.5 rounded-lg">
+                                  {lastSellingUnit.toLocaleString()} د.ع
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <Layers className="w-4 h-4 stroke-[2.5]" />
+                                <span>شريط</span>
+                                <span className="font-mono font-bold bg-blue-700/50 px-2 py-0.5 rounded-lg text-blue-100">
+                                  {(showActualPrices
+                                    ? roundTo250(Number(med.sellingPriceUnit) || calculateStripPrice(Number(med.sellingPricePack), med.unitsPerPack))
+                                    : (Number(med.officialPriceUnit) || (Number(med.officialPricePack) && med.unitsPerPack > 1 ? calculateStripPrice(Number(med.officialPricePack), med.unitsPerPack) : roundTo250(Number(med.sellingPriceUnit) || calculateStripPrice(Number(med.sellingPricePack), med.unitsPerPack))))
+                                  ).toLocaleString()} د.ع
+                                </span>
+                              </>
+                            )}
                           </button>
                         )}
                       </div>
                     </div>
 
                     {/* Batch Selector if multiple batches exist with differing prices */}
-                    {hasMultipleBatches && (
+                    {hasMultipleBatches && !isOutOfStock && (
                       <div className="mt-2.5 pt-2.5 border-t border-dashed border-slate-200 flex items-center gap-2 flex-wrap">
                         <span className="text-xs font-black text-slate-500">اختر تشغيلة محددة:</span>
                         {med.activeBatches?.map((batch) => (
@@ -1757,7 +1827,24 @@ export const PosView: React.FC = () => {
                         >
                           <Minus className="w-4 h-4 stroke-[3]" />
                         </button>
-                        <span className="w-7 sm:w-8 text-center font-black text-base sm:text-lg text-slate-900 font-mono">{item.quantity}</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value);
+                            if (!isNaN(val)) {
+                              updateQuantity(idx, val - item.quantity);
+                            }
+                          }}
+                          onBlur={(e) => {
+                            const val = parseInt(e.target.value);
+                            if (isNaN(val) || val <= 0) {
+                              updateQuantity(idx, 1 - item.quantity);
+                            }
+                          }}
+                          className="w-10 sm:w-12 text-center font-black text-base sm:text-lg text-slate-900 font-mono bg-transparent border-none focus:outline-hidden appearance-none"
+                        />
                         <button
                           type="button"
                           onClick={() => updateQuantity(idx, 1)}
@@ -2153,7 +2240,7 @@ export const PosView: React.FC = () => {
       {completedSale && (
         <div className="hidden print:block w-[80mm] text-black bg-white text-[12px] leading-tight font-sans mx-auto" dir="rtl">
           <div className="text-center mb-3">
-            <h2 className="font-bold text-lg mb-1">صيدليتي</h2>
+            <h2 className="font-bold text-lg mb-1">{pharmacyProfile?.pharmacyName || pharmacyProfile?.name || 'صيدليتي'}</h2>
             <p className="text-[10px] text-gray-600">وصل مبيعات</p>
             <p className="text-[10px] text-gray-600 font-mono mt-1">{completedSale.invoiceNumber}</p>
           </div>
@@ -2207,7 +2294,6 @@ export const PosView: React.FC = () => {
           
           <div className="text-center mt-5 text-[10px] text-gray-600">
             <p>شكراً لزيارتكم</p>
-            <p>تم تطوير النظام بواسطة Antigravity</p>
           </div>
         </div>
       )}
@@ -2216,7 +2302,7 @@ export const PosView: React.FC = () => {
       {completedReturnReceipt && (
         <div className="hidden print:block w-[80mm] text-black bg-white text-[12px] leading-tight font-sans mx-auto" dir="rtl">
           <div className="text-center mb-3">
-            <h2 className="font-bold text-lg mb-1">صيدليتي</h2>
+            <h2 className="font-bold text-lg mb-1">{pharmacyProfile?.pharmacyName || pharmacyProfile?.name || 'صيدليتي'}</h2>
             <div className="inline-block px-2 py-0.5 border border-black font-bold text-[11px] mb-1">
               وصل إرجاع دواء رسمي (Refund Slip)
             </div>
