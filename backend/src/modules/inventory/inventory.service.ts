@@ -1288,7 +1288,7 @@ export class InventoryService {
       // Accept YYYY/MM or YYYY-MM → convert to first day of month
       const cleaned = dto.expiryDate.replace('/', '-');
       const dateVal = cleaned.length === 7 ? `${cleaned}-01` : cleaned;
-      setClauses.push(`expiry_date = $${idx++}`);
+      setClauses.push(`expiry_date = $${idx++}::date`);
       params.push(dateVal);
     }
 
