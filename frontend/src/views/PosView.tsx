@@ -218,7 +218,7 @@ function getMinAllowedPrice(item: CartItem): { costPrice: number; minPrice: numb
   return { costPrice: Math.round(costPrice), minPrice };
 }
 
-export const PosView: React.FC = () => {
+export const PosView: React.FC<{ onOpenSecretVault?: () => void }> = ({ onOpenSecretVault }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<SearchMedicine[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -1399,6 +1399,16 @@ export const PosView: React.FC = () => {
                 type="text"
                 value={searchTerm}
                 onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const raw = searchTerm.trim();
+                    if (raw === '###') {
+                      e.preventDefault();
+                      setSearchTerm('');
+                      setSearchResults([]);
+                      onOpenSecretVault?.();
+                      return;
+                    }
+                  }
                   if (e.key === 'Enter' || e.key === ' ' || e.code === 'Space') {
                     const trimmed = searchTerm.trim().toLowerCase();
                     const isSpace = e.key === ' ' || e.code === 'Space';
@@ -1417,6 +1427,12 @@ export const PosView: React.FC = () => {
                 }}
                 onChange={(e) => {
                   const val = e.target.value;
+                  if (val.trim() === '###') {
+                    setSearchTerm('');
+                    setSearchResults([]);
+                    onOpenSecretVault?.();
+                    return;
+                  }
                   setSearchTerm(val);
                   if (val.endsWith(' ')) {
                     const trimmed = val.trim().toLowerCase();

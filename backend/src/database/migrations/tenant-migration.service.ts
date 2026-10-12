@@ -761,6 +761,51 @@ export class TenantMigrationService {
            AND ii.selling_price_pack > 0;`,
       ],
     },
+
+    // ----------------------------------------------------------------
+    // 009: Secret Vault (Hidden Inventory System)
+    // ----------------------------------------------------------------
+    {
+      name: '009_secret_vault_tables',
+      description: 'Tables for completely hidden and isolated pharmacy inventory, sales and ledger',
+      sql: (schema: string) => [
+        `CREATE TABLE IF NOT EXISTS "${schema}".secret_vault_settings (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          pin_hash VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )`,
+        `CREATE TABLE IF NOT EXISTS "${schema}".secret_vault_items (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          trade_name VARCHAR(255) NOT NULL,
+          scientific_name VARCHAR(255),
+          barcode VARCHAR(100),
+          strength VARCHAR(100),
+          dosage_form VARCHAR(100),
+          purchase_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          selling_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          quantity NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          min_alert_qty NUMERIC(12, 2) DEFAULT 2,
+          expiry_date DATE,
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )`,
+        `CREATE TABLE IF NOT EXISTS "${schema}".secret_vault_transactions (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          item_id UUID REFERENCES "${schema}".secret_vault_items(id) ON DELETE CASCADE,
+          type VARCHAR(20) NOT NULL,
+          quantity NUMERIC(12, 2) NOT NULL,
+          unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          customer_or_source VARCHAR(255),
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT NOW()
+        )`,
+        `CREATE INDEX IF NOT EXISTS "idx_${schema}_vault_item_barcode" ON "${schema}".secret_vault_items (barcode)`,
+        `CREATE INDEX IF NOT EXISTS "idx_${schema}_vault_trans_date" ON "${schema}".secret_vault_transactions (created_at DESC)`,
+      ],
+    },
   ];
 
   /**

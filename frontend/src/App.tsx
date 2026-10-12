@@ -45,6 +45,7 @@ import { ChainManagementView } from './views/ChainManagementView';
 import { AuditLogsView } from './views/AuditLogsView';
 import { LoginView } from './views/LoginView';
 import { ProactiveAlertsModal } from './components/ProactiveAlertsModal';
+import { SecretVaultModal } from './components/SecretVaultModal';
 import { processOutboxQueue } from './utils/outboxQueue';
 import { syncMasterMedicinesDelta } from './utils/localDatabase';
 import {
@@ -264,6 +265,20 @@ export const App: React.FC = () => {
   const [showAlertModal, setShowAlertModal] = useState<boolean>(false);
   const [outboxCount, setOutboxCount] = useState<number>(0);
   const [isManualSyncing, setIsManualSyncing] = useState<boolean>(false);
+  // Secret Vault State & Shortcut
+  const [isSecretVaultOpen, setIsSecretVaultOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleGlobalSecretShortcuts = (e: KeyboardEvent) => {
+      // Ctrl + Shift + X
+      if (e.ctrlKey && e.shiftKey && (e.key === 'X' || e.key === 'x')) {
+        e.preventDefault();
+        setIsSecretVaultOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalSecretShortcuts);
+    return () => window.removeEventListener('keydown', handleGlobalSecretShortcuts);
+  }, []);
 
   // Close drawer on Escape key press
   useEffect(() => {
@@ -953,12 +968,12 @@ export const App: React.FC = () => {
 
         {/* Dynamic View Component with Independent Smooth Scroll */}
         <main className="flex-1 overflow-y-auto p-2 sm:p-5 w-full max-w-full overflow-x-hidden">
-          {activeTab === 'POS' && <PosView />}
-          {activeTab === 'BULK_STOCK' && (canViewInventory ? <BulkStockEntryView /> : <PosView />)}
-          {activeTab === 'INVENTORY' && (canViewInventory ? <InventoryView onNavigateToExpiry={() => navigateToTab('EXPIRY')} /> : <PosView />)}
-          {activeTab === 'EXPIRY' && (canViewInventory ? <ExpiryView onNavigateToInventory={() => navigateToTab('INVENTORY')} /> : <PosView />)}
-          {activeTab === 'STOCKTAKE' && (canViewInventory ? <StocktakeView onNavigateToInventory={() => navigateToTab('INVENTORY')} /> : <PosView />)}
-          {activeTab === 'PURCHASES' && (canViewInventory ? <PurchasesView /> : <PosView />)}
+          {activeTab === 'POS' && <PosView onOpenSecretVault={() => setIsSecretVaultOpen(true)} />}
+          {activeTab === 'BULK_STOCK' && (canViewInventory ? <BulkStockEntryView /> : <PosView onOpenSecretVault={() => setIsSecretVaultOpen(true)} />)}
+          {activeTab === 'INVENTORY' && (canViewInventory ? <InventoryView onNavigateToExpiry={() => navigateToTab('EXPIRY')} /> : <PosView onOpenSecretVault={() => setIsSecretVaultOpen(true)} />)}
+          {activeTab === 'EXPIRY' && (canViewInventory ? <ExpiryView onNavigateToInventory={() => navigateToTab('INVENTORY')} /> : <PosView onOpenSecretVault={() => setIsSecretVaultOpen(true)} />)}
+          {activeTab === 'STOCKTAKE' && (canViewInventory ? <StocktakeView onNavigateToInventory={() => navigateToTab('INVENTORY')} /> : <PosView onOpenSecretVault={() => setIsSecretVaultOpen(true)} />)}
+          {activeTab === 'PURCHASES' && (canViewInventory ? <PurchasesView /> : <PosView onOpenSecretVault={() => setIsSecretVaultOpen(true)} />)}
           {activeTab === 'EXPENSES' && <ExpensesView />}
           {activeTab === 'CHAIN' && (
             <ChainManagementView
@@ -989,6 +1004,12 @@ export const App: React.FC = () => {
           }}
         />
       )}
+
+      {/* Secret Vault Modal (Ctrl+Shift+X or ###) */}
+      <SecretVaultModal
+        isOpen={isSecretVaultOpen}
+        onClose={() => setIsSecretVaultOpen(false)}
+      />
     </div>
   );
 };

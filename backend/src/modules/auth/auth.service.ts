@@ -26,10 +26,17 @@ export class AuthService {
     const username = loginDto.username?.trim();
     const password = loginDto.password;
 
-    // 1. Check Tenant in Master DB
-    const tenant = await this.prisma.tenant.findUnique({
+    // 1. Check Tenant in Master DB (supports both 'fanyla' and 'ph_fanyla')
+    const cleanSlug = pharmacySlug?.replace(/^ph_/, '');
+    let tenant = await this.prisma.tenant.findUnique({
       where: { slug: pharmacySlug },
     });
+
+    if (!tenant && cleanSlug) {
+      tenant = await this.prisma.tenant.findUnique({
+        where: { slug: cleanSlug },
+      });
+    }
 
     if (!tenant) {
       throw new NotFoundException('الصيدلية غير مسجلة في النظام');

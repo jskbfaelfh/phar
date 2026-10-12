@@ -19,6 +19,7 @@ import { ExpensesModule } from './modules/expenses/expenses.module';
 import { ChainModule } from './modules/chain/chain.module';
 import { StocktakeModule } from './modules/stocktake/stocktake.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { VaultModule } from './modules/vault/vault.module';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { SubscriptionGuard } from './common/guards/subscription.guard';
 import { AppController } from './app.controller';
@@ -46,6 +47,7 @@ import { AppService } from './app.service';
     ProfileModule,
     BackupModule,
     RealtimeModule,
+    VaultModule,
     ThrottlerModule.forRoot([
       {
         name: 'default',
