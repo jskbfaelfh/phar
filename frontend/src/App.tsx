@@ -270,14 +270,16 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const handleGlobalSecretShortcuts = (e: KeyboardEvent) => {
-      // Ctrl + Shift + X
-      if (e.ctrlKey && e.shiftKey && (e.key === 'X' || e.key === 'x')) {
+      // Supports both English (X) and Arabic (ء) keyboard layouts, plus physical KeyX
+      const isXKey = e.code === 'KeyX' || e.key === 'x' || e.key === 'X' || e.key === 'ء';
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && isXKey) {
         e.preventDefault();
+        e.stopPropagation();
         setIsSecretVaultOpen((prev) => !prev);
       }
     };
-    window.addEventListener('keydown', handleGlobalSecretShortcuts);
-    return () => window.removeEventListener('keydown', handleGlobalSecretShortcuts);
+    window.addEventListener('keydown', handleGlobalSecretShortcuts, true);
+    return () => window.removeEventListener('keydown', handleGlobalSecretShortcuts, true);
   }, []);
 
   // Close drawer on Escape key press

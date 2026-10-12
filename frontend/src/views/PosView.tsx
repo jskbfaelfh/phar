@@ -1401,7 +1401,7 @@ export const PosView: React.FC<{ onOpenSecretVault?: () => void }> = ({ onOpenSe
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     const raw = searchTerm.trim();
-                    if (raw === '###') {
+                    if (raw === '###' || raw === '***') {
                       e.preventDefault();
                       setSearchTerm('');
                       setSearchResults([]);
@@ -1427,7 +1427,8 @@ export const PosView: React.FC<{ onOpenSecretVault?: () => void }> = ({ onOpenSe
                 }}
                 onChange={(e) => {
                   const val = e.target.value;
-                  if (val.trim() === '###') {
+                  const raw = val.trim();
+                  if (raw === '###' || raw === '***') {
                     setSearchTerm('');
                     setSearchResults([]);
                     onOpenSecretVault?.();
