@@ -199,27 +199,38 @@ export async function searchLocalInventory(searchTerm: string): Promise<any[]> {
       }
 
       const term = searchTerm.trim().toLowerCase();
-      const filtered = availableItems.filter((item) => {
-        const tName = (item.tradeName || '').toLowerCase();
-        const sName = (item.scientificName || '').toLowerCase();
-        const bCode = (item.barcode || '').toLowerCase();
-        const cName = (item.customName || '').toLowerCase();
+      const isDigitsOnly = /^\d+$/.test(term);
 
-        return (
-          tName.includes(term) ||
-          sName.includes(term) ||
-          bCode.includes(term) ||
-          cName.includes(term)
-        );
-      });
+      let filtered: any[];
+      if (isDigitsOnly) {
+        // If query is pure numbers, match exact barcode ONLY
+        filtered = availableItems.filter((item) => {
+          const bCode = (item.barcode || '').trim().toLowerCase();
+          return bCode === term;
+        });
+      } else {
+        filtered = availableItems.filter((item) => {
+          const tName = (item.tradeName || '').toLowerCase();
+          const sName = (item.scientificName || '').toLowerCase();
+          const bCode = (item.barcode || '').toLowerCase();
+          const cName = (item.customName || '').toLowerCase();
 
-      filtered.sort((a, b) => {
-        const bCodeA = (a.barcode || '').trim().toLowerCase();
-        const bCodeB = (b.barcode || '').trim().toLowerCase();
-        if (bCodeA === term && bCodeB !== term) return -1;
-        if (bCodeB === term && bCodeA !== term) return 1;
-        return 0;
-      });
+          return (
+            tName.includes(term) ||
+            sName.includes(term) ||
+            bCode.includes(term) ||
+            cName.includes(term)
+          );
+        });
+
+        filtered.sort((a, b) => {
+          const bCodeA = (a.barcode || '').trim().toLowerCase();
+          const bCodeB = (b.barcode || '').trim().toLowerCase();
+          if (bCodeA === term && bCodeB !== term) return -1;
+          if (bCodeB === term && bCodeA !== term) return 1;
+          return 0;
+        });
+      }
 
       resolve(filtered.slice(0, 40));
     };

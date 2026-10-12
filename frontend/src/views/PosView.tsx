@@ -542,7 +542,14 @@ export const PosView: React.FC<{ onOpenSecretVault?: () => void }> = ({ onOpenSe
         try {
           // جلب كل الأدوية (متوفرة + نافدة) لإظهارها في البحث
           const data = await apiRequest<SearchMedicine[]>(`/inventory?search=${encodeURIComponent(searchTerm)}`);
-          const all = (Array.isArray(data) ? data : []);
+          let all = (Array.isArray(data) ? data : []);
+
+          const rawTerm = searchTerm.trim().toLowerCase();
+          const isDigitsOnly = /^\d+$/.test(rawTerm);
+          if (isDigitsOnly) {
+            all = all.filter((m) => (m.barcode || '').trim().toLowerCase() === rawTerm);
+          }
+
           // ترتيب: المتوفرة أولاً، ثم النافدة
           all.sort((a, b) => {
             const aUnits = Number(a.validUnitsRemaining ?? a.totalUnitsRemaining ?? 0);
@@ -561,7 +568,14 @@ export const PosView: React.FC<{ onOpenSecretVault?: () => void }> = ({ onOpenSe
       // Offline search fallback
       try {
         const localData = await searchLocalInventory(searchTerm);
-        const all = (Array.isArray(localData) ? localData : []);
+        let all = (Array.isArray(localData) ? localData : []);
+
+        const rawTerm = searchTerm.trim().toLowerCase();
+        const isDigitsOnly = /^\d+$/.test(rawTerm);
+        if (isDigitsOnly) {
+          all = all.filter((m) => (m.barcode || '').trim().toLowerCase() === rawTerm);
+        }
+
         all.sort((a, b) => {
           const aUnits = Number(a.validUnitsRemaining ?? a.totalUnitsRemaining ?? 0);
           const bUnits = Number(b.validUnitsRemaining ?? b.totalUnitsRemaining ?? 0);

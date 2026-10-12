@@ -906,10 +906,19 @@ export class InventoryService {
     let exactParamIndex = 0;
     if (query?.search && query.search.trim().length > 0) {
       const term = query.search.trim();
-      params.push(`%${term}%`);
-      params.push(term);
-      exactParamIndex = params.length;
-      searchFilter += ` AND (m.trade_name ILIKE $${params.length - 1} OR m.scientific_name ILIKE $${params.length - 1} OR m.barcode ILIKE $${params.length - 1} OR i.custom_name ILIKE $${params.length - 1} OR i.shelf_location ILIKE $${params.length - 1} OR LOWER(TRIM(m.barcode)) = LOWER($${params.length}))`;
+      const isDigitsOnly = /^\d+$/.test(term);
+
+      if (isDigitsOnly) {
+        // If the query is purely numeric (e.g. 90 or scanned barcode), match exact barcode first
+        params.push(term);
+        exactParamIndex = params.length;
+        searchFilter += ` AND (LOWER(TRIM(COALESCE(m.barcode, ''))) = LOWER($${params.length}))`;
+      } else {
+        params.push(`%${term}%`);
+        params.push(term);
+        exactParamIndex = params.length;
+        searchFilter += ` AND (m.trade_name ILIKE $${params.length - 1} OR m.scientific_name ILIKE $${params.length - 1} OR m.barcode ILIKE $${params.length - 1} OR i.custom_name ILIKE $${params.length - 1} OR i.shelf_location ILIKE $${params.length - 1} OR LOWER(TRIM(COALESCE(m.barcode, ''))) = LOWER($${params.length}))`;
+      }
     }
 
     if (query?.shelfLocation && query.shelfLocation.trim().length > 0) {

@@ -266,14 +266,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({ onNavigateToExpiry
     let result = items.filter((it) => {
       // Client-side search filtering
       if (searchTerm && searchTerm.trim() !== '') {
-        const term = searchTerm.toLowerCase();
-        const matchesSearch = (
-          it.tradeName?.toLowerCase().includes(term) ||
-          it.customName?.toLowerCase().includes(term) ||
-          it.barcode?.toLowerCase().includes(term) ||
-          it.scientificName?.toLowerCase().includes(term)
-        );
-        if (!matchesSearch) return false;
+        const rawTerm = searchTerm.trim();
+        const isDigitsOnly = /^\d+$/.test(rawTerm);
+        const term = rawTerm.toLowerCase();
+
+        if (isDigitsOnly) {
+          // If searching strictly with digits (e.g. 90 or scanned barcode), match exact barcode only
+          const bCode = (it.barcode || '').trim().toLowerCase();
+          if (bCode !== term) return false;
+        } else {
+          const matchesSearch = (
+            it.tradeName?.toLowerCase().includes(term) ||
+            it.customName?.toLowerCase().includes(term) ||
+            it.barcode?.toLowerCase().includes(term) ||
+            it.scientificName?.toLowerCase().includes(term)
+          );
+          if (!matchesSearch) return false;
+        }
       }
 
       if (activeFilter === 'LOW_STOCK') {
